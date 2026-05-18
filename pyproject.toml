@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "como-ocsr"
-version = "1.1.0"
-description = "COMO: Closed-loop Optical Molecule recOgnition with Minimum Risk Training — Optical Chemical Structure Recognition"
+version = "1.1.1"
+description = "COMO: Closed-loop Optical Molecule recOgnition with Minimum Risk Training"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [

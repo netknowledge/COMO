@@ -29,7 +29,7 @@ Quick start::
 from ._core import ComoModel, ComoVocab, evaluate_benchmarks as _raw_evaluate_benchmarks, _result_to_smiles
 from ._chemistry import canonicalize_smiles, canonicalize_tautomer
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 __all__ = [
     # Core classes
