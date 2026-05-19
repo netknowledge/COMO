@@ -61,7 +61,6 @@ import torch  # noqa: E402
 def load_model(
     checkpoint_path: str,
     device: str = "cuda",
-    pretrained: bool = True,
     **model_kwargs,
 ) -> ComoModel:
     """Load a COMO model from a checkpoint file.
@@ -72,8 +71,6 @@ def load_model(
         Path to a ``.pth`` checkpoint (e.g. ``"COMO_joint/tanimoto/final.pth"``).
     device:
         Device string (``"cuda"`` or ``"cpu"``).
-    pretrained:
-        Whether to use ImageNet-pretrained backbone weights (default: ``True``).
     model_kwargs:
         Additional arguments passed to :class:`ComoModel` (e.g. ``d_model``,
         ``nhead``, ``num_decoder_layers``).
@@ -87,7 +84,7 @@ def load_model(
     model = ComoModel(
         vocab=vocab,
         backbone="swin_b",
-        pretrained=pretrained,
+        pretrained=True,
         **model_kwargs,
     )
     model.load_model(checkpoint_path, device=torch.device(device))
