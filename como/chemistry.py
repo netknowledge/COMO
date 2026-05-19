@@ -3,8 +3,11 @@ import multiprocessing
 import numpy as np
 import itertools
 
-from ._constants import RGROUP_SYMBOLS, ABBREVIATIONS, VALENCES, FORMULA_REGEX
-from rdkit import Chem
+from .constants import RGROUP_SYMBOLS, ABBREVIATIONS, VALENCES, FORMULA_REGEX
+from rdkit import Chem, RDLogger
+
+# Suppress RDKit C++ warnings (SMILES parse errors, hydrogen removal, etc.)
+RDLogger.DisableLog('rdApp.*')
 
 from SmilesPE.pretokenizer import atomwise_tokenizer
 

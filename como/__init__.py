@@ -26,10 +26,13 @@ Quick start::
     metrics = como.evaluate(model, ..., gpus="0,1,2")
 """
 
-from ._core import ComoModel, ComoVocab, evaluate_benchmarks as _raw_evaluate_benchmarks, _result_to_smiles
-from ._chemistry import canonicalize_smiles, canonicalize_tautomer
+from .vocab import ComoVocab
+from .model import ComoModel
+from .evaluation import evaluate_benchmarks as _raw_evaluate_benchmarks
+from .inference import _result_to_smiles
+from .chemistry import canonicalize_smiles, canonicalize_tautomer
 
-__version__ = "1.1.1"
+__version__ = "1.2.0"
 
 __all__ = [
     # Core classes
@@ -48,6 +51,11 @@ __all__ = [
     # Version
     "__version__",
 ]
+
+# ---------------------------------------------------------------------------
+# Internal: torch import for load_model
+# ---------------------------------------------------------------------------
+import torch  # noqa: E402
 
 
 def load_model(
@@ -217,25 +225,18 @@ def evaluate(
         Metrics including ``exact_match_acc``, ``avg_tanimoto``, and
         (optionally) ``tautomer_match_acc`` for each SMILES mode.
     """
-    import os as _os
-    _prev = _os.environ.get("CUDA_VISIBLE_DEVICES", None)
-    try:
-        if gpus is not None:
-            _os.environ["CUDA_VISIBLE_DEVICES"] = gpus
-        benchmarks = [{"name": "benchmark", "benchmark_dir": benchmark_dir, "csv_path": csv_path}]
-        results = _raw_evaluate_benchmarks(
-            model,
-            benchmarks,
-            beam_size=beam_size,
-            postproc_workers=postproc_workers,
-            tautomer_standardize=tautomer_standardize,
-        )
-        return results["benchmark"]
-    finally:
-        if _prev is None:
-            _os.environ.pop("CUDA_VISIBLE_DEVICES", None)
-        else:
-            _os.environ["CUDA_VISIBLE_DEVICES"] = _prev
+    # Parse num_gpus from gpus string (e.g. "0,1,2" → 3)
+    _num_gpus = len(gpus.split(",")) if gpus else None
+    benchmarks = [{"name": "benchmark", "benchmark_dir": benchmark_dir, "csv_path": csv_path}]
+    results = _raw_evaluate_benchmarks(
+        model,
+        benchmarks,
+        beam_size=beam_size,
+        postproc_workers=postproc_workers,
+        tautomer_standardize=tautomer_standardize,
+        num_gpus=_num_gpus,
+    )
+    return results["benchmark"]
 
 
 def evaluate_benchmarks(
@@ -267,32 +268,21 @@ def evaluate_benchmarks(
     gpus:
         Comma-separated GPU IDs (e.g. ``"0"`` or ``"0,1,2,3"``).  Set to
         ``None`` to use all available GPUs.  Default: ``"0"`` (single GPU).
+        The count of IDs determines how many GPU processes to spawn (e.g.
+        ``"0,1"`` → 2 GPUs, ``"0,1,2"`` → 3 GPUs).
 
     Returns
     -------
     dict[str, dict]
         Mapping from benchmark name to metrics dict.
     """
-    import os as _os
-    _prev = _os.environ.get("CUDA_VISIBLE_DEVICES", None)
-    try:
-        if gpus is not None:
-            _os.environ["CUDA_VISIBLE_DEVICES"] = gpus
-        return _raw_evaluate_benchmarks(
-            model,
-            benchmarks,
-            beam_size=beam_size,
-            postproc_workers=postproc_workers,
-            tautomer_standardize=tautomer_standardize,
-        )
-    finally:
-        if _prev is None:
-            _os.environ.pop("CUDA_VISIBLE_DEVICES", None)
-        else:
-            _os.environ["CUDA_VISIBLE_DEVICES"] = _prev
-
-
-# ---------------------------------------------------------------------------
-# Internal: torch import for load_model
-# ---------------------------------------------------------------------------
-import torch  # noqa: E402
+    # Parse num_gpus from gpus string (e.g. "0,1,2" → 3)
+    _num_gpus = len(gpus.split(",")) if gpus else None
+    return _raw_evaluate_benchmarks(
+        model,
+        benchmarks,
+        beam_size=beam_size,
+        postproc_workers=postproc_workers,
+        tautomer_standardize=tautomer_standardize,
+        num_gpus=_num_gpus,
+    )

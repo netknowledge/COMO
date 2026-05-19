@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 Zhuoqi Lyu
+Copyright (c) 2025 Zhuoqi Lyu
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -20,37 +20,10 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+---
 
-===========================================================================
-Model Weights License — Creative Commons Attribution-NonCommercial 4.0 (CC BY-NC 4.0)
+Model Weights License: CC BY-NC 4.0
 
-The pre-trained model weights (.pth files) distributed alongside this software
-are licensed under CC BY-NC 4.0:
-
-  https://creativecommons.org/licenses/by-nc/4.0/
-
-You are free to:
-  - Share — copy and redistribute the material in any medium or format
-  - Adapt — remix, transform, and build upon the material
-
-Under the following terms:
-  - Attribution — You must give appropriate credit
-  - NonCommercial — You may not use the material for commercial purposes
-
-
-===========================================================================
-Benchmark Datasets
-
-The benchmark datasets referenced in this project are collected from existing
-public OCSR benchmarks and are NOT covered by the above licenses. Please refer
-to their original sources for applicable license terms and attribution:
-
-  Dataset       Source
-  -------       ------
-  USPTO, CLEF,  Rajan et al., 2020 — https://github.com/Kohulan/DECIMER-Image_Transformer
-  JPO, UOB,
-  Staker
-  Indigo,       Qian et al., 2023 — https://github.com/thomas0809/MolScribe
-  ChemDraw, ACS
-  USPTO-10K     Morin et al., 2023 — https://github.com/DS4SD/molgrapher
-  WildMol-10K   Fang et al., 2025 — https://github.com/orgs/Chem-Struct-ML/repositories
+The model weights associated with this software are licensed under the
+Creative Commons Attribution-NonCommercial 4.0 International License.
+See https://creativecommons.org/licenses/by-nc/4.0/ for details.

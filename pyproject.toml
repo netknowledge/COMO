@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "como-ocsr"
-version = "1.1.1"
+version = "1.2.0"
 description = "COMO: Closed-loop Optical Molecule recOgnition with Minimum Risk Training"
 readme = "README.md"
 license = { text = "MIT" }
@@ -38,7 +38,6 @@ requires-python = ">=3.10"
 dependencies = [
     "torch>=2.0",
     "torchvision>=0.15",
-    "timm>=0.9",
     "rdkit",
     "SmilesPE>=0.0.3",
     "albumentations>=1.3",
@@ -47,12 +46,6 @@ dependencies = [
     "numpy>=1.21",
     "pandas>=1.5",
     "tqdm>=4.60",
-    "func-timeout>=4.3",
-]
-
-[project.optional-dependencies]
-train = [
-    # drawing_engine support (Indigo rendering for data augmentation)
 ]
 
 [project.urls]
@@ -62,6 +55,3 @@ Repository = "https://github.com/netknowledge/COMO"
 
 [tool.setuptools]
 packages = ["como"]
-
-[tool.setuptools.package-data]
-como = ["_indigo/lib/Linux/x64/*"]
