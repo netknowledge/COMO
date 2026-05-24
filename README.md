@@ -275,22 +275,43 @@ Download from: **https://huggingface.co/Keylab/COMO**
 
 ## Benchmark Datasets
 
-Benchmark datasets (images + CSV ground truth) are available on HuggingFace Datasets:
+Benchmark datasets are published as a HuggingFace Dataset with one config per benchmark:
+**[Keylab/OCSR-Benchmarks](https://huggingface.co/datasets/Keylab/OCSR-Benchmarks)**
 
-| Dataset | Images | Type |
-|---------|--------|------|
-| USPTO | ~6K | Real patent images |
-| USPTO-10K | ~10K | Real patent images |
-| CLEF | ~5K | Real patent images |
-| JPO | ~3K | Real patent images |
-| UOB | ~4K | Real academic images |
-| staker | ~1K | Real images |
-| acs | ~2K | Real publication images |
-| WildMol-10K | ~10K | Real wild images |
-| indigo | ~8K | Synthetic (Indigo-rendered) |
-| chemdraw | ~8K | Synthetic (ChemDraw style) |
+| Config | Size | Type |
+|--------|-----:|------|
+| `CLEF` | 992 | Real (patents) |
+| `JPO` | 449 | Real (patents) |
+| `UOB` | 5,740 | Real (academic) |
+| `USPTO` | 5,719 | Real (patents) |
+| `USPTO-10K` | 9,999 | Real (patents) |
+| `Staker` | 50,000 | Real |
+| `ACS` | 331 | Real (publications) |
+| `WildMol-10K` | 9,889 | Real (wild) |
+| `Indigo` | 5,719 | Synthetic |
+| `ChemDraw` | 5,719 | Synthetic |
 
-Download from: **https://huggingface.co/Keylab/COMO** (see `benchmarks/` folder)
+Each sample has three fields: `image_id` (str), `image` (PIL), `SMILES` (str).
+
+```python
+from datasets import load_dataset
+
+# Load a single benchmark
+ds = load_dataset("Keylab/OCSR-Benchmarks", name="USPTO", split="test")
+sample = ds[0]
+sample["image"].show()   # PIL Image
+print(sample["SMILES"])  # ground-truth SMILES
+
+# Iterate over all benchmarks
+configs = ["CLEF", "JPO", "UOB", "USPTO", "USPTO-10K",
+           "Staker", "ACS", "WildMol-10K", "Indigo", "ChemDraw"]
+for name in configs:
+    ds = load_dataset("Keylab/OCSR-Benchmarks", name=name, split="test")
+    print(f"{name}: {len(ds)} samples")
+```
+
+Pre-packaged `.tar.gz` archives are also available for bulk download in the
+[COMO model repository](https://huggingface.co/Keylab/COMO/tree/main/benchmarks).
 
 ## Citation
 
