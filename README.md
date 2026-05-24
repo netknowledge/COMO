@@ -27,7 +27,7 @@ print(smiles)  # "CC(=O)O"
 # Batch prediction on a specific GPU
 smiles_list = como.predict_batch(model, ["mol1.png", "mol2.png"], device="cuda:1")
 
-# Evaluate on a benchmark (single GPU by default)
+# Evaluate on a benchmark (single GPU by default) — file-based
 metrics = como.evaluate(
     model,
     benchmark_dir="benchmark/USPTO/",
@@ -35,12 +35,17 @@ metrics = como.evaluate(
 )
 print(f"Exact Match: {metrics['postprocess/exact_match_acc']:.2%}")
 
-# Multi-GPU, multi-benchmark evaluation
+# Evaluate directly from HuggingFace (no local files needed)
+metrics = como.evaluate(
+    model,
+    hf_dataset="Keylab/OCSR-Benchmarks",
+    hf_config="USPTO",
+)
+
+# Multi-GPU, multi-benchmark evaluation (mix file-based and HF)
 benchmarks = [
-    {"name": "USPTO", "benchmark_dir": "benchmark/USPTO/",
-     "csv_path": "benchmark/USPTO.csv"},
-    {"name": "CLEF",  "benchmark_dir": "benchmark/CLEF/",
-     "csv_path": "benchmark/CLEF_corrected.csv"},
+    {"name": "USPTO", "hf_dataset": "Keylab/OCSR-Benchmarks", "hf_config": "USPTO"},
+    {"name": "CLEF",  "hf_dataset": "Keylab/OCSR-Benchmarks", "hf_config": "CLEF"},
 ]
 results = como.evaluate_benchmarks(model, benchmarks, gpus="0,1,2,3")
 for name, m in results.items():
@@ -124,15 +129,28 @@ Batch prediction on a single GPU.
 
 ---
 
-### `como.evaluate(model, benchmark_dir, csv_path, *, beam_size=1, postproc_workers=32, tautomer_standardize=True, gpus="0")`
+### `como.evaluate(model, benchmark_dir=None, csv_path=None, *, hf_dataset=None, hf_config=None, hf_split="test", beam_size=1, postproc_workers=32, tautomer_standardize=True, gpus="0")`
 
 Evaluate on a single benchmark dataset.  Returns a flat dict of metrics.
+
+Two mutually exclusive (Hugging Face Priority) input modes are supported:
+
+```python
+# File-based
+metrics = como.evaluate(model, "benchmark/USPTO/", "benchmark/USPTO.csv")
+
+# HuggingFace dataset (no local files required)
+metrics = como.evaluate(model, hf_dataset="Keylab/OCSR-Benchmarks", hf_config="USPTO")
+```
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `model` | `ComoModel` | *required* | A loaded model |
-| `benchmark_dir` | `str` | *required* | Directory containing `.png` images |
-| `csv_path` | `str` | *required* | CSV with columns ``image_id``, ``SMILES`` |
+| `benchmark_dir` | `str` or `None` | `None` | Directory containing `.png` images (file-based mode); Ignored if `hf_dataset` is provided |
+| `csv_path` | `str` or `None` | `None` | CSV with columns ``image_id``, ``SMILES`` (file-based mode); Ignored if `hf_dataset` is provided |
+| `hf_dataset` | `str` or `None` | `None` | HuggingFace dataset repo id, e.g. ``"Keylab/OCSR-Benchmarks"`` |
+| `hf_config` | `str` or `None` | `None` | Config / subset name within the HF dataset, e.g. ``"USPTO"`` |
+| `hf_split` | `str` | `"test"` | Dataset split to load |
 | `beam_size` | `int` | `1` | Beam width for decoding |
 | `postproc_workers` | `int` | `32` | Parallel workers for SMILES post-processing |
 | `tautomer_standardize` | `bool` | `True` | Include tautomer-normalized exact match |
@@ -173,11 +191,18 @@ by benchmark name.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `model` | `ComoModel` | *required* | A loaded model |
-| `benchmarks` | `list[dict]` | *required* | Each dict has keys ``"name"``, ``"benchmark_dir"``, ``"csv_path"`` |
+| `benchmarks` | `list[dict]` | *required* | List of benchmark spec dicts (see below) |
 | `beam_size` | `int` | `1` | Beam width for decoding |
 | `postproc_workers` | `int` | `32` | Parallel workers for SMILES post-processing |
 | `tautomer_standardize` | `bool` | `True` | Include tautomer-normalized exact match |
 | `gpus` | `str` or `None` | `"0"` | GPU IDs (``"0,1"``) or ``None`` for all |
+
+Each dict in *benchmarks* must contain ``"name"`` plus one of:
+
+| Mode | Required keys | Optional keys |
+|------|--------------|---------------|
+| File-based | ``"benchmark_dir"``, ``"csv_path"`` | — |
+| HuggingFace | ``"hf_dataset"`` | ``"hf_config"`` (default: benchmark name), ``"hf_split"`` (default: ``"test"``) |
 
 **Returns:** ``dict[str, dict]`` — mapping from benchmark name to a metrics
 dict with the same structure as :func:`evaluate`.  Example::
@@ -194,19 +219,30 @@ dict with the same structure as :func:`evaluate`.  Example::
       },
     }
 
-**Example:**
+**Examples:**
 
-    benchmarks = [
-        {"name": "USPTO", "benchmark_dir": "data/benchmark/real/USPTO",
-         "csv_path": "data/benchmark/real/USPTO.csv"},
-        {"name": "CLEF",  "benchmark_dir": "data/benchmark/real/CLEF",
-         "csv_path": "data/benchmark/real/CLEF_corrected.csv"},
-    ]
-    results = como.evaluate_benchmarks(model, benchmarks, gpus="0,1")
-    for name, metrics in results.items():
-        acc = metrics["postprocess/exact_match_acc"]
-        tan = metrics["postprocess/avg_tanimoto"]
-        print(f"{name}: Exact={acc:.2%}, Tanimoto={tan:.4f}")
+```python
+# File-based
+benchmarks = [
+    {"name": "USPTO", "benchmark_dir": "data/benchmark/real/USPTO",
+     "csv_path": "data/benchmark/real/USPTO.csv"},
+    {"name": "CLEF",  "benchmark_dir": "data/benchmark/real/CLEF",
+     "csv_path": "data/benchmark/real/CLEF_corrected.csv"},
+]
+
+# HuggingFace dataset (recommended — no local files required)
+benchmarks = [
+    {"name": "USPTO", "hf_dataset": "Keylab/OCSR-Benchmarks", "hf_config": "USPTO"},
+    {"name": "CLEF",  "hf_dataset": "Keylab/OCSR-Benchmarks", "hf_config": "CLEF"},
+    {"name": "JPO",   "hf_dataset": "Keylab/OCSR-Benchmarks", "hf_config": "JPO"},
+]
+
+results = como.evaluate_benchmarks(model, benchmarks, gpus="0,1")
+for name, metrics in results.items():
+    acc = metrics["postprocess/exact_match_acc"]
+    tan = metrics["postprocess/avg_tanimoto"]
+    print(f"{name}: Exact={acc:.2%}, Tanimoto={tan:.4f}")
+```
 
 ---
 

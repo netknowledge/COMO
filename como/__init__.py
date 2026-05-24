@@ -188,9 +188,12 @@ def predict_batch(
 
 def evaluate(
     model: ComoModel,
-    benchmark_dir: str,
-    csv_path: str,
+    benchmark_dir: str | None = None,
+    csv_path: str | None = None,
     *,
+    hf_dataset: str | None = None,
+    hf_config: str | None = None,
+    hf_split: str = "test",
     beam_size: int = 1,
     postproc_workers: int = 32,
     tautomer_standardize: bool = True,
@@ -198,14 +201,41 @@ def evaluate(
 ) -> dict:
     """Evaluate model on a single benchmark.
 
+    Two input modes are supported — provide exactly one:
+
+    **Local File Path**:
+
+    .. code-block:: python
+
+        metrics = como.evaluate(model, "benchmark/USPTO/", "benchmark/USPTO.csv")
+
+    **HuggingFace dataset**:
+
+    .. code-block:: python
+
+        metrics = como.evaluate(
+            model,
+            hf_dataset="Keylab/OCSR-Benchmarks",
+            hf_config="USPTO",
+        )
+
     Parameters
     ----------
     model:
         A loaded :class:`ComoModel`.
     benchmark_dir:
         Directory containing benchmark images (``.png`` files).
+        Required when not using *hf_dataset*.
     csv_path:
         Path to CSV with columns ``image_id`` and ``SMILES``.
+        Required when not using *hf_dataset*.
+    hf_dataset:
+        HuggingFace dataset repo id (e.g. ``"Keylab/OCSR-Benchmarks"``).
+        When provided, *benchmark_dir* and *csv_path* must be omitted.
+    hf_config:
+        Config / subset name within the HF dataset (e.g. ``"USPTO"``).
+    hf_split:
+        Dataset split to use (default ``"test"``).
     beam_size:
         Beam width for decoding (1 = greedy).
     postproc_workers:
@@ -222,12 +252,23 @@ def evaluate(
         Metrics including ``exact_match_acc``, ``avg_tanimoto``, and
         (optionally) ``tautomer_match_acc`` for each SMILES mode.
     """
-    # Parse num_gpus from gpus string (e.g. "0,1,2" → 3)
     _num_gpus = len(gpus.split(",")) if gpus else None
-    benchmarks = [{"name": "benchmark", "benchmark_dir": benchmark_dir, "csv_path": csv_path}]
+    if hf_dataset is not None:
+        b_spec = {
+            "name": "benchmark",
+            "hf_dataset": hf_dataset,
+            "hf_config": hf_config or "default",
+            "hf_split": hf_split,
+        }
+    else:
+        if benchmark_dir is None or csv_path is None:
+            raise ValueError(
+                "Provide either (benchmark_dir, csv_path) or hf_dataset."
+            )
+        b_spec = {"name": "benchmark", "benchmark_dir": benchmark_dir, "csv_path": csv_path}
     results = _raw_evaluate_benchmarks(
         model,
-        benchmarks,
+        [b_spec],
         beam_size=beam_size,
         postproc_workers=postproc_workers,
         tautomer_standardize=tautomer_standardize,
@@ -252,10 +293,28 @@ def evaluate_benchmarks(
     model:
         A loaded :class:`ComoModel`.
     benchmarks:
-        List of dicts, each with keys ``"name"``, ``"benchmark_dir"``, and
-        ``"csv_path"``.  Example::
+        List of benchmark spec dicts.  Each dict must contain ``"name"`` plus
+        one of the following input modes:
 
+        * **File-based**: ``"benchmark_dir"`` and ``"csv_path"``
+        * **HuggingFace dataset**: ``"hf_dataset"`` (repo id),
+          ``"hf_config"`` (subset name), and optionally ``"hf_split"``
+          (default ``"test"``)
+
+        Examples::
+
+            # File-based
             [{"name": "USPTO", "benchmark_dir": "...", "csv_path": "..."}]
+
+            # HuggingFace dataset
+            [{"name": "USPTO", "hf_dataset": "Keylab/OCSR-Benchmarks",
+              "hf_config": "USPTO"}]
+
+            # Mix both in one call
+            [
+                {"name": "USPTO",  "hf_dataset": "Keylab/OCSR-Benchmarks", "hf_config": "USPTO"},
+                {"name": "MyData", "benchmark_dir": "data/my/", "csv_path": "data/my.csv"},
+            ]
     beam_size:
         Beam width for decoding (1 = greedy).
     postproc_workers:
