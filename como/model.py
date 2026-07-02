@@ -113,7 +113,7 @@ class ComoModel(nn.Module):
                 border_mode=cv2.BORDER_CONSTANT, 
                 fill=255
             ),
-            A.ToGray(num_output_channels=3),
+            A.ToGray(num_output_channels=3, p=1.0),
             A.Normalize(),
             ToTensorV2(),
         ]
