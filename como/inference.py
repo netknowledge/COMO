@@ -8,9 +8,6 @@ Three SMILES output modes:
   • ``decoder``     – raw SMILES from the decoded token sequence
   • ``graph``       – SMILES reconstructed from predicted atoms + bonds
   • ``postprocess`` – MolScribe-style: replace functional groups, restore stereo
-
-This module is pip-publishable: it contains only inference-time SMILES
-conversion logic, with no training dependencies.
 """
 
 from typing import Dict, List, Optional

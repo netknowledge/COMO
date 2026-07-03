@@ -11,10 +11,6 @@ Architecture::
     BondPredictor   (MLP)          →  pairwise bond-type logits
 
 End-to-end molecule-image recognition: images → SMILES + atom coordinates + bonds.
-
-This module is designed to be pip-publishable: it contains the model
-definition and inference methods only.  Training code lives in the
-separate ``training/`` package.
 """
 
 from typing import Dict, List, Optional, Tuple
@@ -113,7 +109,7 @@ class ComoModel(nn.Module):
                 border_mode=cv2.BORDER_CONSTANT, 
                 fill=255
             ),
-            A.ToGray(num_output_channels=3, p=1.0),
+            # A.ToGray(num_output_channels=3, p=1.0),
             A.Normalize(),
             ToTensorV2(),
         ]
