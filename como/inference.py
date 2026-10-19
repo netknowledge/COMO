@@ -44,7 +44,7 @@ SMILES_MODE_POSTPROCESS = 'postprocess'
 
 # ======================== SMILES Conversion Functions ========================
 
-def _result_to_smiles_decoder(result: Dict) -> Optional[str]:
+def _result_to_smiles_decoder(result: Dict, ignore_cistrans: bool = False) -> Optional[str]:
     """Mode 1: SMILES directly from decoder sequence → canonicalize."""
     if not result or not result.get('success'):
         return None
@@ -52,13 +52,13 @@ def _result_to_smiles_decoder(result: Dict) -> Optional[str]:
         smiles = result.get('decode_smiles', '')
         if not smiles:
             return None
-        can_smi, ok = canonicalize_smiles(smiles, ignore_cistrans=True)
+        can_smi, ok = canonicalize_smiles(smiles, ignore_cistrans=ignore_cistrans)
         return can_smi if can_smi else None
     except Exception:
         return None
 
 
-def _result_to_smiles_graph(result: Dict) -> Optional[str]:
+def _result_to_smiles_graph(result: Dict, ignore_cistrans: bool = False) -> Optional[str]:
     """Mode 2: SMILES entirely reconstructed from predicted atoms + bonds."""
     if not result or not result.get('success'):
         return None
@@ -72,21 +72,26 @@ def _result_to_smiles_graph(result: Dict) -> Optional[str]:
             coords=coords, symbols=symbols, edges=bond_mat)
         if not ok or not smi or smi == '<invalid>':
             return None
-        smi, ok = canonicalize_smiles(smi, ignore_cistrans=True)
+        smi, ok = canonicalize_smiles(smi, ignore_cistrans=ignore_cistrans)
         return smi if ok else None
     except Exception:
         return None
 
 
-def _result_to_smiles_postprocess(result: Dict) -> Optional[str]:
+def _result_to_smiles_postprocess(result: Dict, ignore_cistrans: bool = False) -> Optional[str]:
     """Mode 3 (MolScribe-style): decoder SMILES + postprocessing.
-    
+
     Follows MolScribe's _postprocess_smiles workflow:
       1. Replace R-groups / unknown tokens with isotope-labeled wildcards
       2. Strip stereo from SMILES, build mol (sanitize=False)
       3. Restore chirality/E-Z via _verify_chirality with predicted coords/edges
       4. Expand functional groups back using the mappings
       5. Return canonical SMILES
+
+    ``ignore_cistrans=False`` (default) keeps ``/`` and ``\\`` double-bond
+    annotations in the output — the natural daily-use behaviour.  Benchmark
+    evaluations must pass ``True`` explicitly, because their GT SMILES are
+    canonicalized with ``ignore_cistrans=True``.
     """
     if not result or not result.get('success'):
         return None
@@ -116,35 +121,39 @@ def _result_to_smiles_postprocess(result: Dict) -> Optional[str]:
         pred_smiles, mol = _expand_functional_group(mol, mappings)
 
         if pred_smiles and pred_smiles != '<invalid>':
-            # Canonicalize (with ignore_cistrans) to match GT preprocessing
-            can_smi, ok = canonicalize_smiles(pred_smiles, ignore_cistrans=True)
+            can_smi, ok = canonicalize_smiles(pred_smiles, ignore_cistrans=ignore_cistrans)
             return can_smi if ok and can_smi else None
         return None
     except Exception:
         # Fallback: try plain canonicalize of raw decoder SMILES
         try:
-            can_smi, ok = canonicalize_smiles(smiles, ignore_cistrans=True)
+            can_smi, ok = canonicalize_smiles(smiles, ignore_cistrans=ignore_cistrans)
             return can_smi if ok else None
         except Exception:
             return None
 
 
-def _result_to_smiles(result: Dict, mode: str = SMILES_MODE_POSTPROCESS) -> Optional[str]:
+def _result_to_smiles(result: Dict, mode: str = SMILES_MODE_POSTPROCESS,
+                      ignore_cistrans: bool = False) -> Optional[str]:
     """Dispatcher: convert prediction result → canonical SMILES.
-    
+
     Args:
         result: prediction dict with keys 'decode_smiles', 'symbols',
             'coords', 'bond_mat', 'success'.
         mode: one of ``'decoder'``, ``'graph'``, ``'postprocess'``.
+        ignore_cistrans: forwarded to every mode's canonicalization.
+            False (default) keeps cis/trans annotations in the output —
+            the daily-use behaviour; benchmark evaluations pass ``True``
+            to match their GT preprocessing.
     Returns:
         Canonical SMILES string, or None if conversion failed.
     """
     if mode == SMILES_MODE_DECODER:
-        return _result_to_smiles_decoder(result)
+        return _result_to_smiles_decoder(result, ignore_cistrans=ignore_cistrans)
     elif mode == SMILES_MODE_GRAPH:
-        return _result_to_smiles_graph(result)
+        return _result_to_smiles_graph(result, ignore_cistrans=ignore_cistrans)
     elif mode == SMILES_MODE_POSTPROCESS:
-        return _result_to_smiles_postprocess(result)
+        return _result_to_smiles_postprocess(result, ignore_cistrans=ignore_cistrans)
     else:
         raise ValueError(f"Unknown smiles_mode: {mode!r}. "
                          f"Choose from '{SMILES_MODE_DECODER}', "

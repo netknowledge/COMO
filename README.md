@@ -27,6 +27,9 @@ print(smiles)  # "CC(=O)O"
 # Batch prediction on a specific GPU
 smiles_list = como.predict_batch(model, ["mol1.png", "mol2.png"], device="cuda:1")
 
+# Batch prediction with confidence (see "Prediction confidence" below)
+preds = como.predict_batch(model, ["mol1.png", "mol2.png"], return_confidence=True)
+
 # Evaluate on a benchmark (single GPU by default) — file-based
 metrics = como.evaluate(
     model,
@@ -103,14 +106,15 @@ Predict the SMILES string for a single molecular image.
 | `max_len` | `int` | `500` | Maximum number of tokens to generate |
 | `smiles_mode` | `str` or `None` | `"postprocess"` | ``"postprocess"`` (best quality), ``"graph"``, ``"decoder"``, or ``None`` (raw result dict) |
 | `device` | `str` or `None` | `None` | Optional device override (e.g. ``"cuda:1"``) |
+| `return_confidence` | `bool` | `False` | Also compute a scalar confidence in [0, 1] (see "Prediction confidence" below) |
 
 **Returns:**
-- `str` — predicted SMILES string (if *smiles_mode* is not ``None``)
-- `dict` — full result dict with keys ``tokens``, ``symbols``, ``coords``, ``bond_mat``, ``decode_smiles``, ``success`` (if ``smiles_mode=None``)
+- `str` — predicted SMILES string (if *smiles_mode* is not ``None``); with *return_confidence* `True`, a `(smiles, confidence)` tuple
+- `dict` — full result dict with keys ``tokens``, ``symbols``, ``coords``, ``bond_mat``, ``decode_smiles``, ``success`` plus scoring metrics (if ``smiles_mode=None``; ``confidence`` key also added when *return_confidence* is `True`)
 
 ---
 
-### `como.predict_batch(model, images, *, beam_size=1, max_len=500, smiles_mode="postprocess", device=None)`
+### `como.predict_batch(model, images, *, beam_size=1, max_len=500, smiles_mode="postprocess", device=None, return_confidence=False)`
 
 Batch prediction on a single GPU.
 
@@ -122,10 +126,36 @@ Batch prediction on a single GPU.
 | `max_len` | `int` | `500` | Maximum tokens per image |
 | `smiles_mode` | `str` or `None` | `"postprocess"` | SMILES reconstruction mode |
 | `device` | `str` or `None` | `None` | Optional device override |
+| `return_confidence` | `bool` | `False` | Also compute a scalar confidence in [0, 1] per image (see "Prediction confidence" below) |
+| `internal_batch_size` | `int` | `0` | If > 0, decode in sub-batches of this size (one flat result list, input order) |
+| `prefetch` | `int` | `0` | If > 0 (with `internal_batch_size` > 0), overlap CPU image loading/transform with GPU decode via loader threads (~1.5x on long path-based lists) |
+| `preprocess_workers` | `int` | `12` | Loader threads per GPU for the prefetch pool |
 
 **Returns:**
-- `list[str]` — predicted SMILES for each image (if *smiles_mode* is not ``None``)
-- `list[dict]` — raw result dicts (if ``smiles_mode=None``)
+- `list[str]` — predicted SMILES for each image (if *smiles_mode* is not ``None``); with *return_confidence* `True`, a list of `(smiles, confidence)` tuples
+- `list[dict]` — raw result dicts (if ``smiles_mode=None``; ``confidence`` key also added when *return_confidence* is `True`)
+
+#### Prediction confidence
+
+Every prediction already carries several decoder-side confidence signals:
+
+| Signal | Meaning | Direction |
+|--------|---------|-----------|
+| `bond_conf` | mean softmax probability of the predicted bond types; bounded [0, 1] | higher = more confident |
+| `confidence` | exp(mean per-token log-prob of the chosen decode); bounded (0, 1] but ⚠ length-biased (penalizes long molecules) | higher = more confident |
+| `mean_margin` | mean top-1 minus top-2 token log-prob gap (in nats) | higher = more confident; unbounded, squashed via `m/(1+m)` in the ensemble |
+| `mean_entropy` | mean per-position softmax entropy, bounded by `ln V` | lower = more confident |
+| `ensemble` | parameter-free bounded fusion: mean of `bond_conf`, `m/(1+m)`, and `1 - H/ln(V)` | higher = more confident, in [0, 1] |
+
+With ``return_confidence=True``, a single scalar in [0, 1] is attached to
+each result as ``'confidence'``.  The signal used is selected by
+``CONFIDENCE_SIGNAL`` in ``como/model.py`` (currently ``ensemble``, the
+bounded fusion of the decoder-side signals above).
+
+```python
+preds = como.predict_batch(model, ["mol1.png", "mol2.png"], return_confidence=True)
+# -> [("CC(=O)O", 0.97), ("c1ccccc1", 0.99)]
+```
 
 ---
 
@@ -196,6 +226,8 @@ by benchmark name.
 | `postproc_workers` | `int` | `32` | Parallel workers for SMILES post-processing |
 | `tautomer_standardize` | `bool` | `True` | Include tautomer-normalized exact match |
 | `gpus` | `str` or `None` | `"0"` | GPU IDs (``"0,1"``) or ``None`` for all |
+| `prefetch` | `int` | `4` | Preprocessed sub-batches kept in flight per GPU (overlaps image loading with decode) |
+| `preprocess_workers` | `int` | `12` | Loader threads per GPU |
 
 Each dict in *benchmarks* must contain ``"name"`` plus one of:
 

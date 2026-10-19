@@ -38,10 +38,70 @@ __all__ = ['ComoModel']
 
 
 # Forward reference for _result_to_smiles (imported lazily to avoid circular deps)
-def _result_to_smiles(result: Dict, mode: str = 'postprocess') -> Optional[str]:
+def _result_to_smiles(result: Dict, mode: str = 'postprocess',
+                      ignore_cistrans: bool = False) -> Optional[str]:
     """Lazy import wrapper — see ``como.inference`` for the full implementation."""
     from .inference import _result_to_smiles as _impl
-    return _impl(result, mode=mode)
+    return _impl(result, mode=mode, ignore_cistrans=ignore_cistrans)
+
+
+# Confidence signals available in a prediction dict:
+#   'bond_conf'   — mean softmax prob of the predicted bond types; [0, 1]
+#   'confidence'  — exp(mean per-token log-prob of the chosen decode); (0, 1]
+#                   but length-biased (long molecules → smaller mean)
+#   'mean_margin' — mean top-1 minus top-2 token log-prob gap; [0, ∞) unbounded
+#   'mean_entropy'— mean per-position softmax entropy; [0, ln V] (V = vocab size)
+#   'ensemble'    — parameter-free bounded fusion (see `_pick_confidence`)
+CONFIDENCE_SIGNALS = ('ensemble', 'bond_conf', 'confidence', 'mean_margin', 'mean_entropy')
+
+# Signal used when ``return_confidence=True``.
+CONFIDENCE_SIGNAL = 'ensemble'
+
+
+def _pick_confidence(result: Dict, signal: str = CONFIDENCE_SIGNAL,
+                     vocab_size: int = 207) -> float:
+    """Extract one scalar confidence in [0, 1] from a raw prediction dict.
+
+    Supported signals (see ``CONFIDENCE_SIGNALS``):
+
+    * ``'ensemble'`` — parameter-free mean of three bounded signals:
+      ``bond_conf``, margin squashed via the standard logit transform
+      ``m / (1 + m)`` (margin is a difference of log-probs, i.e. in nats, so
+      the scale-free squash is the natural bounded re-parametrization), and
+      normalized entropy ``1 - H / ln(V)``.  No dataset-fitted constants.
+    * single raw signals, with ``mean_entropy`` inverted to
+      ``1 / (1 + H)`` and ``mean_margin`` clamped to [0, ∞).
+
+    Returns ``0.0`` when the signal is missing or non-finite (e.g. failed
+    decode).
+    """
+    def _val(key: str) -> float:
+        try:
+            v = float(result[key])
+        except (KeyError, TypeError, ValueError):
+            return float('nan')
+        return v
+
+    if signal == 'ensemble':
+        bc = _val('bond_conf')
+        mg01 = _val('mean_margin')
+        mg01 = 0.0 if not (mg01 == mg01) else max(0.0, mg01)
+        mg01 = mg01 / (1.0 + mg01)
+        H = _val('mean_entropy')
+        H = 0.0 if not (H == H) else max(0.0, H)
+        ent01 = 1.0 - min(max(H / float(np.log(max(vocab_size, 2))), 0.0), 1.0)
+        parts = [p for p in (bc, mg01, ent01) if p == p]  # drop NaNs
+        v = float(np.mean(parts)) if parts else 0.0
+    elif signal == 'mean_entropy':
+        v = 1.0 / (1.0 + max(0.0, _val('mean_entropy')))
+    elif signal == 'mean_margin':
+        v = max(0.0, _val('mean_margin'))
+    else:
+        v = _val(signal)
+
+    if not (v == v):  # NaN
+        return 0.0
+    return float(max(0.0, min(1.0, v)))
 
 
 class ComoModel(nn.Module):
@@ -68,6 +128,7 @@ class ComoModel(nn.Module):
         dim_feedforward: int = 256*4,
         dropout: float = 0.1,
         use_gradient_checkpointing: bool = False,
+        encoder_weights: Optional[str] = None,
     ):
         super().__init__()
         self.vocab = vocab
@@ -78,7 +139,8 @@ class ComoModel(nn.Module):
         self.image_encoder = ImageEncoder(
             backbone=backbone,
             pretrained=pretrained,
-            d_model=d_model
+            d_model=d_model,
+            encoder_weights=encoder_weights,
         )
         self.pos_enc_2d = PositionalEncoding2D(d_model, max_h=20, max_w=20)
         
@@ -510,30 +572,103 @@ class ComoModel(nn.Module):
 
         return result
 
+    def _token_score_metrics(self, seq: List[int], logits: torch.Tensor) -> Dict:
+        """Per-token scoring metrics for `seq` under per-position `logits` (shape [1, T, V]).
+
+        Excludes SOS and PAD positions; keeps EOS. All metrics come from the
+        decoder forward pass that is already run for bond prediction, so they
+        cost nothing extra; for greedy decoding they are exact.
+
+        Returns a dict with keys:
+            mean_log_prob: mean per-token log-prob (``-inf`` if no valid token)
+            confidence:    ``exp(mean_log_prob)``
+            mean_margin:   mean top-1 minus top-2 log-prob gap
+            mean_entropy:  mean per-position softmax entropy
+            eos_lp_at_stop: log-prob of EOS at the final decoded position
+        """
+        seq_tensor = torch.tensor([seq], dtype=torch.long, device=logits.device)
+        T = seq_tensor.size(1)
+        valid = (seq_tensor != self.vocab.sos_idx) & (seq_tensor != self.vocab.pad_idx)
+        n = valid.sum().item()
+
+        logp = F.log_softmax(logits, dim=-1)
+        p = F.softmax(logits, dim=-1)
+
+        eos_lp_at_stop = logp[0, T - 1, self.vocab.eos_idx].item()
+
+        if n == 0:
+            return {
+                'mean_log_prob': float('-inf'),
+                'confidence': 0.0,
+                'mean_margin': 0.0,
+                'mean_entropy': 0.0,
+                'eos_lp_at_stop': eos_lp_at_stop,
+            }
+
+        chosen_lp = logp.gather(-1, seq_tensor.unsqueeze(-1)).squeeze(-1)
+        chosen_lp = chosen_lp.masked_fill(~valid, 0.0)
+        mean_log_prob = chosen_lp.sum().item() / n
+
+        sorted_lp = logp.sort(descending=True).values
+        margin = (sorted_lp[0, :, 0] - sorted_lp[0, :, 1])[valid[0]]
+
+        entropy = -(p * torch.clamp(p, min=1e-12).log()).sum(-1)
+        mean_entropy = entropy[0][valid[0]].mean().item()
+
+        return {
+            'mean_log_prob': mean_log_prob,
+            'confidence': float(np.exp(mean_log_prob)),
+            'mean_margin': margin.mean().item(),
+            'mean_entropy': mean_entropy,
+            'eos_lp_at_stop': eos_lp_at_stop,
+        }
+
+    def _bond_confidence(self, edge_logits: torch.Tensor, device: torch.device) -> float:
+        """Mean softmax probability of the predicted bond types over bonded atom pairs.
+
+        ``edge_logits``: ``[7, N, N]`` raw edge logits for one image. 0.0 if no
+        bonded pairs are predicted.
+        """
+        N = edge_logits.size(1)
+        if N < 2:
+            return 0.0
+        edge_probs = F.softmax(edge_logits, dim=0)  # [7, N, N]
+        argmax = edge_probs.argmax(dim=0)
+        ii, jj = torch.triu_indices(N, N, offset=1, device=device)
+        pred = argmax[ii, jj]
+        bonded = pred > 0
+        if not bonded.any():
+            return 0.0
+        return edge_probs[pred[bonded], ii[bonded], jj[bonded]].mean().item()
+
     def _postprocess_sequence(self, seq: List[int], feat: torch.Tensor, device: torch.device) -> Dict:
         """Decode a chartok_coords token sequence → SMILES + atom coords, then predict bonds.
 
-        Returns a dict with keys: token_ids, decode_smiles, symbols, coords, bond_mat, success.
+        Returns a dict with keys: token_ids, decode_smiles, symbols, coords, bond_mat,
+        success, plus scoring metrics (see ``_token_score_metrics`` / ``_bond_confidence``).
         """
         seq_tensor = torch.tensor([seq], dtype=torch.long, device=device)
         
         atom_indices, atom_counts = extract_atom_indices_from_tokens(seq_tensor, self.vocab)
         atom_mask = torch.arange(atom_indices.size(1), device=device) < atom_counts.unsqueeze(1)
         
-        hidden_states, _ = self.sequence_decoder(feat, seq_tensor)
+        hidden_states, logits = self.sequence_decoder(feat, seq_tensor)
         edge_logits = self.bond_predictor(hidden_states, atom_indices, atom_mask)
         edge_preds = _symmetrize_edge_predictions(edge_logits[0])
         
         result = self.vocab.sequence_to_smiles(seq)
         
-        return {
+        out = {
             'token_ids': seq,
             'decode_smiles': result.get('smiles', ''),
             'symbols': result.get('symbols', []),
             'coords': result.get('coords', []),
             'bond_mat': edge_preds,
-            'success': len(result.get('smiles', '')) > 0
+            'success': len(result.get('smiles', '')) > 0,
         }
+        out.update(self._token_score_metrics(seq, logits))
+        out['bond_conf'] = self._bond_confidence(edge_logits[0], device)
+        return out
 
     def _greedy_decode_batch(self, feats: torch.Tensor, max_len: int, device: torch.device) -> List[List[int]]:
         """Batched greedy decoding with KV-cached Transformer steps.
@@ -657,9 +792,10 @@ class ComoModel(nn.Module):
         max_atoms = int(atom_counts.max().item())
         
         edge_logits_all = None
+        logits_all = None
         if max_atoms > 0:
             atom_mask = torch.arange(atom_indices.size(1), device=device) < atom_counts.unsqueeze(1)
-            hidden_states, _ = self.sequence_decoder(img_features, padded, tgt_key_padding_mask=padding_mask)
+            hidden_states, logits_all = self.sequence_decoder(img_features, padded, tgt_key_padding_mask=padding_mask)
             edge_logits_all = self.bond_predictor(hidden_states, atom_indices, atom_mask)
         
         results = []
@@ -669,8 +805,22 @@ class ComoModel(nn.Module):
             
             if edge_logits_all is not None and atom_counts[b] > 0:
                 edge_preds = _symmetrize_edge_predictions(edge_logits_all[b])
+                bond_conf = self._bond_confidence(edge_logits_all[b], device)
             else:
                 edge_preds = np.zeros((0, 0), dtype=np.int64)
+                bond_conf = 0.0
+            
+            if logits_all is not None:
+                seq_logits = logits_all[b:b + 1, :len(seq)]
+                metrics = self._token_score_metrics(seq, seq_logits)
+            else:
+                metrics = {
+                    'mean_log_prob': float('-inf'),
+                    'confidence': 0.0,
+                    'mean_margin': 0.0,
+                    'mean_entropy': 0.0,
+                    'eos_lp_at_stop': 0.0,
+                }
             
             results.append({
                 'token_ids': seq,
@@ -679,6 +829,8 @@ class ComoModel(nn.Module):
                 'coords': result.get('coords', []),
                 'bond_mat': edge_preds,
                 'success': len(result.get('smiles', '')) > 0,
+                **metrics,
+                'bond_conf': bond_conf,
             })
         
         return results
@@ -764,7 +916,8 @@ class ComoModel(nn.Module):
 
     def predict(self, image_source, device: Optional[torch.device] = None, beam_size: int = 3,
                 max_len: int = 500, return_preprocessed: bool = False,
-                smiles_mode: Optional[str] = None) -> Dict:
+                smiles_mode: Optional[str] = None, return_confidence: bool = False,
+                ignore_cistrans: bool = False) -> Dict:
         """End-to-end prediction for a single image.
 
         Args:
@@ -775,32 +928,53 @@ class ComoModel(nn.Module):
             return_preprocessed: If True, include the preprocessed image tensor.
             smiles_mode: If set, add ``'pred_smiles'`` key:
                 ``'decoder'``, ``'graph'``, ``'postprocess'``, or ``None``.
+            return_confidence: If True and *smiles_mode* is set, also add a
+                ``'confidence'`` key — one scalar in [0, 1] per image, taken
+                from the signal selected by ``CONFIDENCE_SIGNAL`` (see
+                :func:`_pick_confidence`).  Costs nothing extra: all signals
+                are already computed during the bond-prediction pass.
+            ignore_cistrans: Forwarded to the ``'postprocess'`` SMILES
+                canonicalization.  False (default) keeps cis/trans
+                annotations in the output — the daily-use behaviour;
+                benchmark evaluations pass True to match their GT
+                preprocessing (canonicalized with ignore_cistrans=True).
         Returns:
-            Prediction dict (see :meth:`generate` for keys).
+            Prediction dict (see :meth:`generate` for keys), plus
+            ``'pred_smiles'`` when *smiles_mode* is set and ``'confidence'``
+            when *return_confidence* is set.
         """
         if device is None:
             device = next(self.parameters()).device
-        
+
         if isinstance(image_source, torch.Tensor):
             img_tensor = self._preprocess_tensor(image_source, device)
         else:
             img_tensor = self._preprocess_image(image_source, device)
-        
+
         result = self.generate(images=img_tensor, beam_size=beam_size, max_len=max_len, device=device)[0]
-        
+
         if return_preprocessed:
             result['preprocessed_img'] = img_tensor.squeeze(0).cpu()
-        
+
         if smiles_mode is not None:
-            result['pred_smiles'] = _result_to_smiles(result, mode=smiles_mode)
-        
+            result['pred_smiles'] = _result_to_smiles(result, mode=smiles_mode,
+                                                      ignore_cistrans=ignore_cistrans)
+
+        if return_confidence:
+            result['confidence'] = _pick_confidence(result, vocab_size=len(self.vocab))
+
         return result
 
-    def predict_batch(self, image_sources: List, 
-                      device: Optional[torch.device] = None, 
+    def predict_batch(self, image_sources: List,
+                      device: Optional[torch.device] = None,
                       beam_size: int = 3,
-                      max_len: int = 500, 
-                      smiles_mode: Optional[str] = None) -> List[Dict]:
+                      max_len: int = 500,
+                      smiles_mode: Optional[str] = None,
+                      return_confidence: bool = False,
+                      ignore_cistrans: bool = False,
+                      internal_batch_size: int = 0,
+                      prefetch: int = 0,
+                      preprocess_workers: int = 0) -> List[Dict]:
         """Batch prediction on a single device.
 
         Args:
@@ -809,35 +983,138 @@ class ComoModel(nn.Module):
             beam_size: Beam width (1 = greedy).
             max_len: Maximum decoding length.
             smiles_mode: If set, add ``'pred_smiles'`` key to each result.
+            return_confidence: If True and *smiles_mode* is set, also add a
+                ``'confidence'`` key (scalar in [0, 1]) to each result, taken
+                from the signal selected by ``CONFIDENCE_SIGNAL`` (see
+                :func:`_pick_confidence`).  Costs nothing extra: all signals
+                are already computed during the bond-prediction pass.
+            ignore_cistrans: Forwarded to the ``'postprocess'`` SMILES
+                canonicalization.  False (default) keeps cis/trans
+                annotations in the output — the daily-use behaviour;
+                benchmark evaluations pass True to match their GT
+                preprocessing (canonicalized with ignore_cistrans=True).
+            internal_batch_size: If > 0, split *image_sources* into sub-batches
+                of this size and decode them one after another, returning one
+                flat result list (same ordering as the inputs).  0 (default)
+                runs everything as a single batch.
+            prefetch: If > 0 *and* *internal_batch_size* > 0, keep this many
+                preprocessed sub-batches in flight on CPU threads so image
+                loading/transform overlaps with GPU decode (the decode loop is
+                autoregressive and CPU-gap-bound, so this overlap is the main
+                throughput lever; measured ~1.5x end-to-end).  Requires the
+                image sources to be file paths (tensor sources are used as-is).
+                0 (default) = no prefetching, synchronous preprocessing.
+            preprocess_workers: Thread count for the prefetch pool (default 12
+                when *prefetch* > 0; ignored otherwise).
+
         Returns:
-            List of prediction dicts.
+            List of prediction dicts (one per input image, input order); each
+            gains ``'pred_smiles'`` when *smiles_mode* is set and
+            ``'confidence'`` when *return_confidence* is set.
         """
         if device is None:
             if list(self.parameters()):
                 device = next(self.parameters()).device
             else:
                 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-                
+
         if isinstance(device, str):
             device = torch.device(device)
 
-        tensors = []
-        cpu_device = torch.device('cpu') 
-        
-        for src in image_sources:
-            if isinstance(src, torch.Tensor):
-                tensors.append(self._preprocess_tensor(src, cpu_device))
-            else:
-                tensors.append(self._preprocess_image(src, cpu_device))
-        
+        # --- fast path: single shot, no splitting/prefetching
+        if internal_batch_size <= 0 and prefetch <= 0:
+            return self._predict_batch_core(image_sources, device, beam_size,
+                                            max_len, smiles_mode, return_confidence,
+                                            ignore_cistrans=ignore_cistrans)
+
+        # --- split into sub-batches
+        n = len(image_sources)
+        if internal_batch_size <= 0:
+            internal_batch_size = max(1, n)
+        chunks = [image_sources[i:i + internal_batch_size]
+                  for i in range(0, n, internal_batch_size)]
+
+        results: List[Dict] = []
+        if prefetch <= 0:
+            for chunk in chunks:
+                results.extend(self._predict_batch_core(chunk, device, beam_size,
+                                                        max_len, smiles_mode,
+                                                        return_confidence,
+                                                        ignore_cistrans=ignore_cistrans))
+            return results
+
+        # --- threaded prefetch pipeline: overlap CPU-side preprocessing with
+        # GPU decode (the autoregressive decode loop leaves CPU-GPU gaps that
+        # the loader threads fill; ~1.5x throughput on path-based inputs).
+        from concurrent.futures import ThreadPoolExecutor
+        from collections import deque
+
+        def _preprocess(chunk):
+            tensors = []
+            cpu = torch.device('cpu')
+            for src in chunk:
+                if isinstance(src, torch.Tensor):
+                    tensors.append(self._preprocess_tensor(src, cpu))
+                else:
+                    tensors.append(self._preprocess_image(src, cpu))
+            return tensors
+
+        with ThreadPoolExecutor(max_workers=preprocess_workers or 12) as pool:
+            futures = deque(pool.submit(_preprocess, c) for c in chunks[:prefetch])
+            next_chunk = min(prefetch, len(chunks))
+            for ci in range(len(chunks)):
+                tensors = futures.popleft().result()
+                if next_chunk < len(chunks):
+                    futures.append(pool.submit(_preprocess, chunks[next_chunk]))
+                    next_chunk += 1
+                if not tensors:
+                    continue
+                img_batch = torch.cat(tensors, dim=0).to(device)
+                results.extend(self._predict_batch_core(img_batch, device, beam_size,
+                                                        max_len, smiles_mode,
+                                                        return_confidence,
+                                                        ignore_cistrans=ignore_cistrans,
+                                                        preloaded_tensors=tensors))
+        return results
+
+    def _predict_batch_core(self, image_sources: List,
+                            device: torch.device,
+                            beam_size: int,
+                            max_len: int,
+                            smiles_mode: Optional[str],
+                            return_confidence: bool,
+                            ignore_cistrans: bool = False,
+                            preloaded_tensors: Optional[List] = None) -> List[Dict]:
+        """Single-batch predict used by :meth:`predict_batch`.
+
+        When *preloaded_tensors* is given (prefetch pipeline), use them
+        directly instead of preprocessing *image_sources* again; the two lists
+        are index-aligned.
+        """
+        if preloaded_tensors is not None:
+            tensors = preloaded_tensors
+        else:
+            cpu_device = torch.device('cpu')
+            tensors = []
+            for src in image_sources:
+                if isinstance(src, torch.Tensor):
+                    tensors.append(self._preprocess_tensor(src, cpu_device))
+                else:
+                    tensors.append(self._preprocess_image(src, cpu_device))
+
         if not tensors:
             return []
 
         img_batch = torch.cat(tensors, dim=0).to(device)
         results = self.generate(images=img_batch, beam_size=beam_size, max_len=max_len, device=device)
-        
+
         if smiles_mode is not None:
             for r in results:
-                r['pred_smiles'] = _result_to_smiles(r, mode=smiles_mode)
-        
+                r['pred_smiles'] = _result_to_smiles(r, mode=smiles_mode,
+                                                     ignore_cistrans=ignore_cistrans)
+
+        if return_confidence:
+            for r in results:
+                r['confidence'] = _pick_confidence(r, vocab_size=len(self.vocab))
+
         return results

@@ -36,7 +36,8 @@ __all__ = ['evaluate_benchmarks', 'predict_multigpu']
 
 def _inference_worker(rank: int, world_size: int, model: 'ComoModel',  # type: ignore[name-defined]  # noqa: F821
                       data_paths: List[str], return_dict: dict,
-                      beam_size: int = 1, mini_batch_size: int = 128):
+                      beam_size: int = 1, mini_batch_size: int = 128,
+                      prefetch: int = 4, preprocess_workers: int = 12):
     """Worker for mp.spawn — runs inference on one GPU slice."""
     import cv2
     cv2.setNumThreads(0)
@@ -53,7 +54,10 @@ def _inference_worker(rank: int, world_size: int, model: 'ComoModel',  # type: i
             it = tqdm(it, desc=f"GPU-{rank}", total=math.ceil(len(my_paths) / mini_batch_size))
         for i in it:
             results.extend(model.predict_batch(my_paths[i:i + mini_batch_size],
-                                               device=device, beam_size=beam_size))
+                                               device=device, beam_size=beam_size,
+                                               internal_batch_size=mini_batch_size,
+                                               prefetch=prefetch,
+                                               preprocess_workers=preprocess_workers))
         return_dict[rank] = results
     except Exception as e:
         import traceback; traceback.print_exc()
@@ -61,7 +65,8 @@ def _inference_worker(rank: int, world_size: int, model: 'ComoModel',  # type: i
 
 
 def predict_multigpu(model: 'ComoModel', image_paths: List[str],  # type: ignore[name-defined]  # noqa: F821
-                     beam_size: int = 1, num_gpus: int | None = None) -> List[Dict]:
+                     beam_size: int = 1, num_gpus: int | None = None,
+                     prefetch: int = 4, preprocess_workers: int = 12) -> List[Dict]:
     """Distribute inference across GPUs via mp.spawn.
 
     Args:
@@ -71,13 +76,19 @@ def predict_multigpu(model: 'ComoModel', image_paths: List[str],  # type: ignore
         num_gpus: Number of GPUs to use. If None (default), uses all available
                   GPUs via ``torch.cuda.device_count()``.  Explicitly pass an
                   integer to limit parallelism (e.g. ``num_gpus=3``).
+        prefetch: Preprocessed sub-batches kept in flight per GPU (default 4);
+            overlaps CPU image loading with GPU decode (~1.5x throughput on
+            path-based inputs).  0 disables the overlap.
+        preprocess_workers: Loader threads per GPU (default 12).
     Returns:
         Ordered list of prediction dicts.
     """
     import torch.multiprocessing as mp
     world_size = num_gpus if num_gpus is not None else torch.cuda.device_count()
     if world_size <= 1:
-        return model.predict_batch(image_paths, beam_size=beam_size)
+        return model.predict_batch(image_paths, beam_size=beam_size,
+                                   internal_batch_size=128, prefetch=prefetch,
+                                   preprocess_workers=preprocess_workers)
 
     print(f"Distributing {len(image_paths)} images across {world_size} GPUs...")
     model.cpu(); model.share_memory()
@@ -85,7 +96,8 @@ def predict_multigpu(model: 'ComoModel', image_paths: List[str],  # type: ignore
     return_dict = manager.dict()
     try:
         mp.spawn(_inference_worker,
-                 args=(world_size, model, image_paths, return_dict, beam_size),
+                 args=(world_size, model, image_paths, return_dict, beam_size,
+                       128, prefetch, preprocess_workers),
                  nprocs=world_size, join=True)
     except Exception as e:
         print(f"mp.spawn failed: {e}"); return []
@@ -155,6 +167,8 @@ def evaluate_benchmarks(
     postproc_workers: int = 32,
     tautomer_standardize: bool = True,
     num_gpus: int | None = None,
+    prefetch: int = 4,
+    preprocess_workers: int = 12,
 ) -> Dict[str, Dict]:
     """Evaluate model on multiple benchmarks using mp.spawn.
 
@@ -193,14 +207,17 @@ def evaluate_benchmarks(
             images = [d['img_path'] for d in gt_data]
         print(f"  Images: {len(images)}")
 
-        raw_results = predict_multigpu(model, images, beam_size=beam_size, num_gpus=num_gpus)
+        raw_results = predict_multigpu(model, images, beam_size=beam_size, num_gpus=num_gpus,
+                                       prefetch=prefetch, preprocess_workers=preprocess_workers)
         min_len = min(len(raw_results), len(gt_data))
         raw_results, gt_data = raw_results[:min_len], gt_data[:min_len]
 
         benchmark_stats = {}
         for mode in modes:
             print(f"  Post-processing [{mode}] ...")
-            converter = partial(_result_to_smiles, mode=mode)
+            # benchmark GT is canonicalized with ignore_cistrans=True, so
+            # predictions must be too for exact-match parity
+            converter = partial(_result_to_smiles, mode=mode, ignore_cistrans=True)
             chunksize = max(1, len(raw_results) // (postproc_workers * 4))
             with ProcessPoolExecutor(max_workers=postproc_workers) as ex:
                 pred_smiles = list(tqdm(ex.map(converter, raw_results, chunksize=chunksize),

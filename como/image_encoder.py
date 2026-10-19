@@ -9,6 +9,7 @@ images into spatial feature maps consumed by the Sequence Decoder.
 import torch
 import torch.nn as nn
 import torchvision.models as models
+from typing import Optional
 
 
 class ImageEncoder(nn.Module):
@@ -21,7 +22,8 @@ class ImageEncoder(nn.Module):
         self,
         backbone: str = 'resnet50',
         pretrained: bool = False,
-        d_model: int = 512
+        d_model: int = 512,
+        encoder_weights: Optional[str] = None,
     ):
         super().__init__()
         self.backbone_name = backbone
@@ -62,6 +64,29 @@ class ImageEncoder(nn.Module):
         
         # Project to d_model
         self.proj = nn.Conv2d(self.feat_dim, d_model, kernel_size=1)
+
+        if encoder_weights is not None:
+            import torch as _torch
+            sd = _torch.load(encoder_weights, map_location='cpu',
+                             weights_only=True)
+            sd = {k[len('image_encoder.'):]: v for k, v in sd.items()
+                  if k.startswith('image_encoder.')}
+            missing, unexpected = self.load_state_dict(sd, strict=False)
+            real_missing = [k for k in missing
+                            if not k.startswith('proj.')
+                            # geometry-derived buffers are recomputed at init
+                            # (window-size maps; weight_maps drops them too)
+                            and 'relative_position_index' not in k
+                            and 'attn_mask' not in k]
+            expected_unexpected = [
+                k for k in unexpected if 'decoder' in k or 'mask_token' in k]
+            bad_unexpected = [k for k in unexpected
+                              if k not in expected_unexpected]
+            assert not real_missing and not bad_unexpected, \
+                f'encoder_weights load failed: missing={real_missing[:5]} ' \
+                f'unexpected={bad_unexpected[:5]}'
+            print(f'[image_encoder] init from {encoder_weights}: '
+                  f'{len(sd)} tensors (proj kept fresh)')
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

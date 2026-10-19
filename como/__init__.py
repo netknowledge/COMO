@@ -19,6 +19,12 @@ Quick start::
     # Batch prediction
     results = como.predict_batch(model, ["mol1.png", "mol2.png"])
 
+    # Batch prediction with confidence (ensemble of decoder-side signals;
+    # see COMO_dev/README.md "Prediction confidence")
+    preds = como.predict_batch(model, ["mol1.png", "mol2.png"],
+                               return_confidence=True)
+    # -> [("CC(=O)O", 0.97), ("c1ccccc1", 0.99)]
+
     # Benchmark evaluation
     metrics = como.evaluate(model, "benchmark/USPTO/", "benchmark/USPTO.csv")
 
@@ -32,7 +38,7 @@ from .evaluation import evaluate_benchmarks as _raw_evaluate_benchmarks
 from .inference import _result_to_smiles
 from .chemistry import canonicalize_smiles, canonicalize_tautomer
 
-__version__ = "1.2.4"
+__version__ = "1.2.5"
 
 __all__ = [
     # Core classes
@@ -99,7 +105,9 @@ def predict(
     max_len: int = 500,
     smiles_mode: str = "postprocess",
     device: str | None = None,
-) -> str | dict:
+    return_confidence: bool = False,
+    ignore_cistrans: bool = False,
+) -> str | dict | tuple:
     """Predict the SMILES string for a single molecular image.
 
     Parameters
@@ -120,13 +128,20 @@ def predict(
         tokens dict instead of a SMILES string).
     device:
         Optional device override.
+    return_confidence:
+        If True and *smiles_mode* is set, also compute a scalar confidence
+        in [0, 1] (from the signal selected by ``CONFIDENCE_SIGNAL`` in
+        ``como.model``; costs nothing extra — all signals are already
+        computed during the bond-prediction pass).
 
     Returns
     -------
-    str or dict
-        If *smiles_mode* is not ``None``, returns the predicted SMILES string.
-        If ``None``, returns the full result dict containing tokens, atom
-        symbols, coordinates, bond matrix, etc.
+    str or dict or tuple
+        If *smiles_mode* is not ``None`` and *return_confidence* is False,
+        returns the predicted SMILES string; with *return_confidence* True,
+        returns ``(smiles, confidence)``.  If *smiles_mode* is ``None``,
+        returns the full result dict containing tokens, atom symbols,
+        coordinates, bond matrix, scoring metrics, etc.
     """
     if device is not None:
         model.to(device)
@@ -135,9 +150,12 @@ def predict(
         beam_size=beam_size,
         max_len=max_len,
         smiles_mode=smiles_mode,
+        return_confidence=return_confidence,
+        ignore_cistrans=ignore_cistrans,
     )
     if smiles_mode is not None:
-        return result["pred_smiles"]
+        return (result["pred_smiles"], result.get("confidence", 0.0)) if return_confidence \
+            else result["pred_smiles"]
     return result
 
 
@@ -149,7 +167,12 @@ def predict_batch(
     max_len: int = 500,
     smiles_mode: str = "postprocess",
     device: str | None = None,
-) -> list[str] | list[dict]:
+    return_confidence: bool = False,
+    ignore_cistrans: bool = False,
+    internal_batch_size: int = 0,
+    prefetch: int = 0,
+    preprocess_workers: int = 0,
+) -> list[str] | list[dict] | list[tuple]:
     """Predict SMILES for a batch of images (single GPU).
 
     Parameters
@@ -166,12 +189,29 @@ def predict_batch(
         SMILES reconstruction mode (``"postprocess"`` recommended).
     device:
         Optional device override.
+    return_confidence:
+        If True and *smiles_mode* is set, also compute a scalar confidence
+        in [0, 1] per image (from the signal selected by
+        ``CONFIDENCE_SIGNAL``; costs nothing extra — all signals are already
+        computed during the bond-prediction pass).
+    internal_batch_size:
+        If > 0, decode in sub-batches of this size (one flat result list in
+        input order).  0 = single batch.
+    prefetch:
+        If > 0 *and* *internal_batch_size* > 0, overlap CPU-side image
+        loading/transform with GPU decode via a thread pool (recommended for
+        long path-based image lists: ~1.5x throughput; the autoregressive
+        decode loop leaves CPU-GPU gaps that the loader threads fill).
+        Requires file-path sources.  0 = synchronous preprocessing.
+    preprocess_workers:
+        Thread count for the prefetch pool (default 12 when *prefetch* > 0).
 
     Returns
     -------
-    list[str] or list[dict]
+    list[str] or list[tuple] or list[dict]
         Predicted SMILES strings (or raw result dicts if *smiles_mode* is
-        ``None``).
+        ``None``); with *return_confidence* True and *smiles_mode* set,
+        returns ``(smiles, confidence)`` tuples per image.
     """
     if device is not None:
         model.to(device)
@@ -180,8 +220,15 @@ def predict_batch(
         beam_size=beam_size,
         max_len=max_len,
         smiles_mode=smiles_mode,
+        return_confidence=return_confidence,
+        ignore_cistrans=ignore_cistrans,
+        internal_batch_size=internal_batch_size,
+        prefetch=prefetch,
+        preprocess_workers=preprocess_workers,
     )
     if smiles_mode is not None:
+        if return_confidence:
+            return [(r["pred_smiles"], r.get("confidence", 0.0)) for r in results]
         return [r["pred_smiles"] for r in results]
     return results
 
@@ -198,6 +245,8 @@ def evaluate(
     postproc_workers: int = 32,
     tautomer_standardize: bool = True,
     gpus: str | None = "0",
+    prefetch: int = 4,
+    preprocess_workers: int = 12,
 ) -> dict:
     """Evaluate model on a single benchmark.
 
@@ -273,6 +322,8 @@ def evaluate(
         postproc_workers=postproc_workers,
         tautomer_standardize=tautomer_standardize,
         num_gpus=_num_gpus,
+        prefetch=prefetch,
+        preprocess_workers=preprocess_workers,
     )
     return results["benchmark"]
 
@@ -285,6 +336,8 @@ def evaluate_benchmarks(
     postproc_workers: int = 32,
     tautomer_standardize: bool = True,
     gpus: str | None = "0",
+    prefetch: int = 4,
+    preprocess_workers: int = 12,
 ) -> dict[str, dict]:
     """Evaluate model on multiple benchmarks.
 
@@ -341,4 +394,6 @@ def evaluate_benchmarks(
         postproc_workers=postproc_workers,
         tautomer_standardize=tautomer_standardize,
         num_gpus=_num_gpus,
+        prefetch=prefetch,
+        preprocess_workers=preprocess_workers,
     )
