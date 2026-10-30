@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 
 from rdkit import Chem
-from rdkit.Chem import AllChem, Draw
+from rdkit.Chem import AllChem
 from rdkit import DataStructs, RDLogger
 
 # Suppress RDKit C++ warnings during evaluation (SMILES parse errors, etc.)

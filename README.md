@@ -12,6 +12,41 @@ non-differentiable objectives.
 pip install como-ocsr
 ```
 
+## Training
+
+The complete training pipeline is released in this repository:
+supervised MLE training, Minimum Risk Training (MRT), and the interleaved
+MLE + MRT joint recipe used for the released checkpoints.
+
+```bash
+git clone https://github.com/netknowledge/COMO
+cd COMO
+pip install -e ".[training]"
+
+# paper recipe: joint MLE + MRT with the visual reward (4 GPUs; single-GPU works too)
+# (visual judge = frozen MolDiscriminator, downloaded by prepare_mol_discriminator.py)
+python scripts/data/prepare_pubchem_smiles.py
+python scripts/data/prepare_uspto_mol.py
+python scripts/data/prepare_molparser_mrt.py
+python scripts/data/prepare_mol_discriminator.py
+python scripts/data/prepare_benchmarks.py
+
+torchrun --nproc_per_node=4 scripts/train/train_joint_mle_mrt.py \
+    --smiles_list data/pubchem_smiles/pubchem_1M_seed2026.txt \
+    --mrt_every_n_steps 4 \
+    --reward_mode visual \
+    --visual_reward_encoder data/mol_discriminator/20260321_final.pth
+```
+
+Released recipes and full documentation (data licenses, the three reward
+modes, the two-stage ablations, custom-dataset MRT finetuning, and the exact
+hyperparameters of the released checkpoints):
+
+- **[TRAINING.md](https://github.com/netknowledge/COMO/blob/main/TRAINING.md)** — training guide
+- Training data: [Keylab/COMO `training_data/`](https://huggingface.co/Keylab/COMO/tree/main/training_data)
+  (PubChem 1M subset + MolParser-SFT images; full dataset provenance and
+  download scripts in the guide)
+
 ## Quick Start
 
 ```python
@@ -396,8 +431,14 @@ If you use COMO in your research, please cite:
 
 ## License
 
-- **Code** (`como/` package): MIT License
+- **Code**: MIT License (includes the `training/` pipeline)
 - **Model Weights** (`.pth` files): CC BY-NC 4.0 (non-commercial use only)
+- **Training Data**: mixed sources — see
+  [TRAINING.md](https://github.com/netknowledge/COMO/blob/main/TRAINING.md) for the
+  full table:
+  - PubChem subset: [PubChem](https://pubchem.ncbi.nlm.nih.gov/) SMILES (public-domain; see PubChem terms)
+  - USPTO Mol: MolScribe (`yujieq/MolScribe`); USPTO data is public domain
+  - MolParser-SFT real images: [UniParser/MolParser-7M](https://huggingface.co/datasets/UniParser/MolParser-7M) — **non-commercial use only**
 - **Benchmark Datasets**: collected from existing public OCSR benchmarks; please refer to their
   original sources for license and attribution:
 

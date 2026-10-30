@@ -279,14 +279,23 @@ class ComoModel(nn.Module):
     def load_model(self, path: str, device: Optional[torch.device] = None):
         """Load trained model weights from a checkpoint file.
 
+        Tolerant to checkpoints saved from a torch.compile()-wrapped image
+        encoder: ``image_encoder._orig_mod.*`` keys are remapped to
+        ``image_encoder.*`` so the same checkpoint loads into the bare model.
+
         Args:
             path: Path to the ``.pth`` or ``.pt`` checkpoint.
             device: Target device (default: current parameter device).
         """
         if device is None:
             device = next(self.parameters()).device
-        
+
         state_dict = torch.load(path, map_location=device, weights_only=False)
+        if any('._orig_mod.' in k for k in state_dict):
+            state_dict = {
+                (k.replace('._orig_mod.', '.') if '._orig_mod.' in k else k): v
+                for k, v in state_dict.items()
+            }
         self.load_state_dict(state_dict)
         self.to(device)
         self.eval()
@@ -370,36 +379,33 @@ class ComoModel(nn.Module):
         is_sos = (last_tokens == vocab.sos_idx)
         is_char = ~is_x & ~is_y & ~is_sos & ~finished
 
-        if is_x.any():
-            x_mask = torch.ones(V, dtype=torch.bool, device=logits.device)
-            x_mask[vocab.y_bin_start_idx:vocab.y_bin_end_idx + 1] = False
-            logits[is_x] = logits[is_x].masked_fill(x_mask.unsqueeze(0), NEG_INF)
+        # branchless composition: each case contributes a [B, V] fill mask;
+        # non-matching rows contribute all-False. Value-identical to the
+        # row-select version but with no .any() host syncs (graph-safe).
+        x_fill = torch.ones(V, dtype=torch.bool, device=logits.device)
+        x_fill[vocab.y_bin_start_idx:vocab.y_bin_end_idx + 1] = False
+        y_fill = torch.zeros(V, dtype=torch.bool, device=logits.device)
+        y_fill[vocab.x_bin_start_idx:vocab.y_bin_end_idx + 1] = True
+        y_fill[vocab.pad_idx] = True
+        y_fill[vocab.sos_idx] = True
+        y_fill[vocab.unk_idx] = True
+        sos_fill = torch.zeros(V, dtype=torch.bool, device=logits.device)
+        sos_fill[vocab.x_bin_start_idx:vocab.y_bin_end_idx + 1] = True
+        sos_fill[vocab.pad_idx] = True
+        sos_fill[vocab.sos_idx] = True
+        sos_fill[vocab.eos_idx] = True
+        sos_fill[vocab.unk_idx] = True
+        char_fill = torch.zeros(V, dtype=torch.bool, device=logits.device)
+        char_fill[vocab.y_bin_start_idx:vocab.y_bin_end_idx + 1] = True
+        char_fill[vocab.pad_idx] = True
+        char_fill[vocab.sos_idx] = True
+        char_fill[vocab.unk_idx] = True
 
-        if is_y.any():
-            y_mask = torch.zeros(V, dtype=torch.bool, device=logits.device)
-            y_mask[vocab.x_bin_start_idx:vocab.y_bin_end_idx + 1] = True
-            y_mask[vocab.pad_idx] = True
-            y_mask[vocab.sos_idx] = True
-            y_mask[vocab.unk_idx] = True
-            logits[is_y] = logits[is_y].masked_fill(y_mask.unsqueeze(0), NEG_INF)
-
-        if is_sos.any():
-            sos_mask = torch.zeros(V, dtype=torch.bool, device=logits.device)
-            sos_mask[vocab.x_bin_start_idx:vocab.y_bin_end_idx + 1] = True
-            sos_mask[vocab.pad_idx] = True
-            sos_mask[vocab.sos_idx] = True
-            sos_mask[vocab.eos_idx] = True
-            sos_mask[vocab.unk_idx] = True
-            logits[is_sos] = logits[is_sos].masked_fill(sos_mask.unsqueeze(0), NEG_INF)
-
-        if is_char.any():
-            char_mask = torch.zeros(V, dtype=torch.bool, device=logits.device)
-            char_mask[vocab.y_bin_start_idx:vocab.y_bin_end_idx + 1] = True
-            char_mask[vocab.pad_idx] = True
-            char_mask[vocab.sos_idx] = True
-            char_mask[vocab.unk_idx] = True
-            logits[is_char] = logits[is_char].masked_fill(char_mask.unsqueeze(0), NEG_INF)
-
+        fill = is_x.unsqueeze(1) & x_fill
+        fill |= is_y.unsqueeze(1) & y_fill
+        fill |= is_sos.unsqueeze(1) & sos_fill
+        fill |= is_char.unsqueeze(1) & char_fill
+        logits = logits.masked_fill(fill, NEG_INF)
         return logits
 
     def _greedy_decode(self, feat: torch.Tensor, max_len: int, device: torch.device) -> List[int]:
@@ -724,6 +730,7 @@ class ComoModel(nn.Module):
         max_len: int,
         device: torch.device,
         temperature: float = 1.0,
+        kv_dtype: torch.dtype = torch.float32,
     ) -> List[List[int]]:
         """Batched multinomial sampling with KV-cached decoding.
 
@@ -735,9 +742,24 @@ class ComoModel(nn.Module):
 
         memory = feats.flatten(2).permute(0, 2, 1)
 
-        tokens = torch.full((B,), vocab.sos_idx, dtype=torch.long, device=device)
-        seqs = tokens.unsqueeze(1)
+        # preallocated sequence buffer (sos first) - avoids the per-step
+        # torch.cat growth in the rollout decode; unwritten tail = pad
+        seq_buf = torch.full((B, max_len + 1), vocab.pad_idx,
+                             dtype=torch.long, device=device)
+        seq_buf[:, 0] = vocab.sos_idx
+        tokens = seq_buf[:, 0]
         finished = torch.zeros(B, dtype=torch.bool, device=device)
+
+        # pooled KV buffers (no per-step concat copy); reused across MRT calls
+        pool = getattr(self, '_rollout_kv_pool', None)
+        if (pool is None or pool['max_T'] != max_len
+                or pool['bufs'][0]['self_k'].size(0) != B
+                or pool['bufs'][0]['self_k'].device != memory.device
+                or pool['bufs'][0]['self_k'].dtype != kv_dtype):
+            pool = self.sequence_decoder.make_kv_pool(
+                B, max_len, memory.device, dtype=kv_dtype)
+            self._rollout_kv_pool = pool
+
         cache = None
 
         for step in range(max_len):
@@ -745,27 +767,29 @@ class ComoModel(nn.Module):
                 break
 
             logits, cache = self.sequence_decoder.forward_step_cached(
-                memory, tokens, step, cache
+                memory, tokens, step, cache, kv_pool=pool
             )
 
-            last_tokens = seqs[:, -1]
+            last_tokens = tokens
             logits = self._apply_constraints_batch(logits, last_tokens, finished)
 
-            probs = F.softmax(logits / temperature, dim=-1)
-            tokens = torch.multinomial(probs, 1).squeeze(-1)
+            # fp32 probs: torch.multinomial is fp16-sensitive and this [B, V]
+            # op costs nothing against the KV traffic
+            probs = F.softmax(logits.float() / temperature, dim=-1)
+            new_tokens = torch.multinomial(probs, 1).squeeze(-1)
 
             tokens = torch.where(
                 finished,
-                torch.full_like(tokens, vocab.pad_idx),
-                tokens,
+                torch.full_like(new_tokens, vocab.pad_idx),
+                new_tokens,
             )
             finished = finished | (tokens == vocab.eos_idx)
-            seqs = torch.cat([seqs, tokens.unsqueeze(1)], dim=1)
+            seq_buf[:, step + 1] = tokens
 
         result = []
         pad, eos = vocab.pad_idx, vocab.eos_idx
         for b in range(B):
-            seq = seqs[b].tolist()
+            seq = seq_buf[b, :max_len + 1].tolist()
             if eos in seq:
                 seq = seq[:seq.index(eos) + 1]
             while seq and seq[-1] == pad:

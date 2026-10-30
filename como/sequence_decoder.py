@@ -11,12 +11,18 @@ Public API:
 """
 
 import math
+import os
 from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
+
+# COMO_SDPA=0 opts out of fused SDPA for non-fp32 attention; default ON
+# (fp32 tiny decode shapes measured ~1.3x SLOWER under SDPA on 2026-10-22
+# but fp16 decode shapes measured FASTER - hence the dtype gate)
+_SDPA_ENABLED = os.environ.get('COMO_SDPA', '1') != '0'
 
 
 # ======================== KV-Cache Helper ========================
@@ -27,6 +33,9 @@ def _mha_with_kv_cache(
     kv_new_input: Optional[torch.Tensor],
     cached_k: Optional[torch.Tensor],
     cached_v: Optional[torch.Tensor],
+    buf_k: Optional[torch.Tensor] = None,
+    buf_v: Optional[torch.Tensor] = None,
+    write_idx: Optional[int] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Multi-head attention with KV-cache for incremental decoding.
 
@@ -65,16 +74,30 @@ def _mha_with_kv_cache(
         v_new = F.linear(kv_new_input, W[2*d:],  b[2*d:]  if b is not None else None)
         k_new = k_new.view(B, -1, n_heads, d_head).transpose(1, 2)
         v_new = v_new.view(B, -1, n_heads, d_head).transpose(1, 2)
-        k = torch.cat([cached_k, k_new], dim=2) if cached_k is not None else k_new
-        v = torch.cat([cached_v, v_new], dim=2) if cached_v is not None else v_new
+        if buf_k is not None:
+            # preallocated pool: write in place, attend over the slice view
+            # (no per-step concat copy); callers write sequentially so the
+            # slice content is identical to the incremental cat
+            buf_k[:, :, write_idx, :] = k_new.squeeze(2)
+            buf_v[:, :, write_idx, :] = v_new.squeeze(2)
+            k = buf_k[:, :, :write_idx + 1]
+            v = buf_v[:, :, :write_idx + 1]
+        else:
+            k = torch.cat([cached_k, k_new], dim=2) if cached_k is not None else k_new
+            v = torch.cat([cached_v, v_new], dim=2) if cached_v is not None else v_new
     else:
         assert cached_k is not None, "Must provide kv_new_input or cached_k/v"
         k, v = cached_k, cached_v
 
     # --- Scaled dot-product attention ---
-    attn = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(d_head)
-    attn = F.softmax(attn, dim=-1)
-    out = torch.matmul(attn, v)                              # [B, heads, Lq, d_head]
+    # fp32 tiny decode shapes: unfused 3-op form is the measured winner;
+    # fp16/bf16 decode enables fused SDPA under COMO_SDPA=1
+    if _SDPA_ENABLED and q.dtype != torch.float32:
+        out = F.scaled_dot_product_attention(q, k, v)        # [B, heads, Lq, d_head]
+    else:
+        attn = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(d_head)
+        attn = F.softmax(attn, dim=-1)
+        out = torch.matmul(attn, v)                          # [B, heads, Lq, d_head]
     out = out.transpose(1, 2).contiguous().view(B, -1, d)    # [B, Lq, d]
     out = F.linear(out, mha.out_proj.weight, mha.out_proj.bias)
 
@@ -210,8 +233,14 @@ class SequenceDecoder(nn.Module):
         new_token_ids: torch.Tensor,
         step_idx: int,
         cache: Optional[List[Dict[str, Optional[torch.Tensor]]]],
+        kv_pool: Optional[Dict] = None,
     ) -> Tuple[torch.Tensor, List[Dict[str, Optional[torch.Tensor]]]]:
         """One-step forward through the decoder with a KV-cache.
+
+        With ``kv_pool`` given, self-attention K/V are written into
+        preallocated per-layer buffers (step = tensor slot; cross K/V cached
+        once at step 0) and no legacy cache dict is built - the caller keeps
+        passing ``cache=None``. Legacy cat-based path otherwise.
 
         Instead of re-encoding the full growing sequence at every step
         (*O(T²)* per step, *O(T³)* total), this method processes only the
@@ -239,6 +268,36 @@ class SequenceDecoder(nn.Module):
         h = self.token_embedding(new_token_ids.unsqueeze(1)) + self.pos_encoder(pos)
 
         num_layers = len(self.transformer_decoder.layers)
+
+        if kv_pool is not None:
+            for i, layer in enumerate(self.transformer_decoder.layers):
+                bufs = kv_pool['bufs'][i]
+                sa_out, _, _ = _mha_with_kv_cache(
+                    layer.self_attn, h, h, None, None,
+                    buf_k=bufs['self_k'], buf_v=bufs['self_v'],
+                    write_idx=step_idx)
+                h = layer.norm1(h + layer.dropout1(sa_out))
+
+                if step_idx == 0:
+                    ca_out, ca_k, ca_v = _mha_with_kv_cache(
+                        layer.multihead_attn, h, memory, None, None)
+                    bufs['cross_k'] = ca_k
+                    bufs['cross_v'] = ca_v
+                else:
+                    ca_out, _, _ = _mha_with_kv_cache(
+                        layer.multihead_attn, h, None,
+                        bufs['cross_k'], bufs['cross_v'])
+                h = layer.norm2(h + layer.dropout2(ca_out))
+
+                ff = layer.linear2(layer.dropout(layer.activation(layer.linear1(h))))
+                h = layer.norm3(h + layer.dropout3(ff))
+
+            if self.transformer_decoder.norm is not None:
+                h = self.transformer_decoder.norm(h)
+
+            logits = self.output_head(h.squeeze(1))  # [B, vocab_size]
+            return logits, None
+
         if cache is None:
             cache = [
                 {'self_k': None, 'self_v': None, 'cross_k': None, 'cross_v': None}
@@ -275,3 +334,30 @@ class SequenceDecoder(nn.Module):
 
         logits = self.output_head(h.squeeze(1))  # [B, vocab_size]
         return logits, new_cache
+
+    def make_kv_pool(self, batch_size: int, max_T: int,
+                     device: torch.device,
+                     dtype: torch.dtype = torch.float32) -> Dict:
+        """Preallocated per-layer KV buffers for pooled rollout decoding.
+
+        Caller passes the pool to every ``forward_step_cached`` call with
+        ``cache=None``; buffers are overwritten from slot 0 on each decode,
+        so the pool is reusable across decode invocations with the same
+        batch size / device / dtype. An fp16 pool halves the per-step KV
+        bandwidth (the decode loop is memory-bound, not launch-bound).
+        """
+        num_layers = len(self.transformer_decoder.layers)
+        n_heads = self.transformer_decoder.layers[0].self_attn.num_heads
+        d_head = self.d_model // n_heads
+        dtype = dtype if dtype is not None else self.token_embedding.weight.dtype
+        bufs = []
+        for _ in range(num_layers):
+            bufs.append({
+                'self_k': torch.empty(batch_size, n_heads, max_T, d_head,
+                                      device=device, dtype=dtype),
+                'self_v': torch.empty(batch_size, n_heads, max_T, d_head,
+                                      device=device, dtype=dtype),
+                'cross_k': None,
+                'cross_v': None,
+            })
+        return {'bufs': bufs, 'max_T': max_T}

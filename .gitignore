@@ -9,6 +9,12 @@ build/
 *.egg
 .vscode/
 
+# Training run outputs (checkpoints, results, data, tensorboard logs)
+data/
+checkpoints/
+results/
+logs/
+
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/
 
