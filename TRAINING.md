@@ -252,11 +252,10 @@ train_mrt(
     image_size=(384, 384), n_bins=64, backbone='swin_b',
     d_model=256, nhead=8, num_decoder_layers=6, dim_feedforward=1024,
 
-    # MRT settings — train_mrt's API defaults reflect the standalone
-    # (two-stage-style) MRT finetune recipe, NOT the paper's joint phase:
-    # in the joint pipeline MRT gradients share the MLE optimizer (4e-4, λ=0.1, §4);
-    # run an MRT-only finetune at a much lower LR, like the legacy stage-2
-    # recipe (6 epochs, batch 16, lr 1e-5) and the SwinOCSR MRT experiment.
+    # MRT settings — 
+    # in the joint pipeline MRT gradients share the MLE optimizer (4e-4, λ=0.1); 
+    # while the (legacy two-stage-style) MRT finetune recipe
+    # run an MRT-only finetune at a much lower LR (6 epochs, batch 16, lr 1e-5), which is used in SwinOCSR MRT fine-tuning experiment.
     num_epochs=6, batch_size=16,
     encoder_lr=1e-5, decoder_lr=1e-5,       # ~40x below the MLE-stage LR (4e-4)
     rl_temperature=0.5, rl_n_samples=32,
@@ -299,7 +298,7 @@ E-SMILES). For rendering such wild SMILES internally, the drawing engine
 
 ## 7. The visual reward in detail
 
-For `reward_mode=visual` (paper §II.2, Eq. 3 "cycle-consistency"):
+For `reward_mode=visual`:
 
 1. **Both sides are rendered**: the ground-truth SMILES *and* every sampled
    prediction are rendered back to images (`--visual_reward_renderer`:

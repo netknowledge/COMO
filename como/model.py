@@ -291,6 +291,11 @@ class ComoModel(nn.Module):
             device = next(self.parameters()).device
 
         state_dict = torch.load(path, map_location=device, weights_only=False)
+        # Checkpoints saved while torch.compile was active carry the
+        # _orig_mod. prefix on the compiled image_encoder keys; strip it
+        # for strict load (compiled checkpoints only - vanilla untouched).
+        if any('._orig_mod.' in k for k in state_dict):
+            state_dict = {k.replace('._orig_mod.', '.'): v for k, v in state_dict.items()}
         if any('._orig_mod.' in k for k in state_dict):
             state_dict = {
                 (k.replace('._orig_mod.', '.') if '._orig_mod.' in k else k): v

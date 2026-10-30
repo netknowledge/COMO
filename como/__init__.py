@@ -38,7 +38,7 @@ from .evaluation import evaluate_benchmarks as _raw_evaluate_benchmarks
 from .inference import _result_to_smiles
 from .chemistry import canonicalize_smiles, canonicalize_tautomer
 
-__version__ = "1.2.5"
+__version__ = "1.3.0"
 
 __all__ = [
     # Core classes
