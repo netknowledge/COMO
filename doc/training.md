@@ -151,7 +151,7 @@ Key MRT options:
 
 ## 4. Reproducing the released checkpoints
 
-The released `COMO_joint/{visual,tanimoto,edit_distance}/final.pth` weights on
+The released `models/{visual,tanimoto,edit_distance}/final.pth` weights on
 [Hugging Face](https://huggingface.co/Keylab/COMO) were produced by the
 command in §3 with **all defaults**:
 

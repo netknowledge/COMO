@@ -1,0 +1,11 @@
+name,SMILES
+Amlodipine,CCOC(=O)C1=C(NC(=C(C1C2=CC=CC=C2Cl)C(=O)OC)C)COCCN
+Atorvastatin,CC(C)C1=C(C(=C(N1CC[C@H](C[C@H](CC(=O)O)O)O)C2=CC=C(C=C2)F)C3=CC=CC=C3)C(=O)NC4=CC=CC=C4
+Gabapentin,C1CCC(CC1)(CC(=O)O)CN
+Levothyroxine,C1=C(C=C(C(=C1I)OC2=CC(=C(C(=C2)I)O)I)I)C[C@@H](C(=O)O)N
+Lisinopril,C1C[C@H](N(C1)C(=O)[C@H](CCCCN)N[C@@H](CCC2=CC=CC=C2)C(=O)O)C(=O)O
+Losartan,CCCCC1=NC(=C(N1CC2=CC=C(C=C2)C3=CC=CC=C3C4=NNN=N4)CO)Cl
+Metformin,CN(C)C(=N)N=C(N)N
+Metoprolol,CC(C)NCC(COC1=CC=C(C=C1)CCOC)O
+Salbutamol,CC(C)(C)NCC(C1=CC(=C(C=C1)O)CO)O
+Sertraline,CN[C@H]1CC[C@H](C2=CC=CC=C12)C3=CC(=C(C=C3)Cl)Cl

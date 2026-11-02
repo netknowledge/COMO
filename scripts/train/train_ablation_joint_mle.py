@@ -131,7 +131,7 @@ if __name__ == '__main__':
     else:
         if not pubchem_smiles_pkl.exists():
             print(f"ERROR: PubChem SMILES not found: {pubchem_smiles_pkl}")
-            print("       (obtain data/pubchem_smiles/pubchem_smile_list.pkl — see TRAINING.md — "
+            print("       (obtain data/pubchem_smiles/pubchem_smile_list.pkl — see doc/training.md — "
                   "or pass --smiles_list <path/to/smiles.txt>)")
             sys.exit(1)
         with open(pubchem_smiles_pkl, 'rb') as f:
