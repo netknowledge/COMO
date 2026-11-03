@@ -30,15 +30,11 @@ smiles = como.predict(model, "examples/sample_images/Metformin.png")
 # -> CN(C)C(=N)N=C(N)N
 ```
 
-A checkpoint and two GPU lines are all you need for inference. See the
-[getting-started guide](doc/getting_started.md) for downloading checkpoints
-and the [examples](examples/) folder for runnable scripts and a notebook.
+A checkpoint and two lines of code are all you need for inference. See the [getting-started guide](doc/getting_started.md) for downloading checkpoints and the [examples](examples/) folder for runnable scripts and a notebook.
 
 ## Training
 
-The complete training pipeline is released in this repository: supervised MLE
-training, Minimum Risk Training (MRT), and the interleaved MLE + MRT joint
-recipe used for the released checkpoints.
+The complete training pipeline is released in this repository: supervised MLE training, Minimum Risk Training (MRT), and the interleaved MLE + MRT joint recipe used for the released checkpoints.
 
 ```bash
 # data preparation (idempotent; skips already-complete steps)
@@ -56,9 +52,7 @@ torchrun --nproc_per_node=4 scripts/train/train_joint_mle_mrt.py \
     --visual_reward_encoder data/mol_discriminator/20260321_final.pth
 ```
 
-All recipes, data licenses, and the exact hyperparameters of the released
-checkpoints: the [training guide](doc/training.md). Training data:
-[Keylab/COMO `training_data/`](https://huggingface.co/Keylab/COMO/tree/main/training_data).
+All recipes, data licenses, and the exact hyperparameters of the released checkpoints: the [training guide](doc/training.md). Training data: [Keylab/COMO `training_data/`](https://huggingface.co/Keylab/COMO/tree/main/training_data).
 
 ## Documentation
 
@@ -103,16 +97,12 @@ If you use COMO in your research, please cite:
 
 ## License
 
-**Code and model weights** — all of COMO's source code (including the
-`training/` pipeline and the examples) and the released `.pth` model weights
-are licensed under **CC BY-NC 4.0** (non-commercial use only). See
-[LICENSE](LICENSE) for the full license text.
+**Code and model weights** — all of COMO's source code (including the `training/` pipeline and the examples) and the released `.pth` model weights are licensed under **CC BY-NC 4.0** (non-commercial use only). See [LICENSE](LICENSE) for the full license text.
 
-- **Training Data**: mixed sources — see
+**Training Data**: mixed sources — see
   [doc/training.md](doc/training.md) for the full table:
   - PubChem subset: [PubChem](https://pubchem.ncbi.nlm.nih.gov/) SMILES (public-domain; see PubChem terms)
   - USPTO Mol: MolScribe (`yujieq/MolScribe`); USPTO data is public domain
   - MolParser-SFT real images: [UniParser/MolParser-7M](https://huggingface.co/datasets/UniParser/MolParser-7M) — **non-commercial use only**
-- **Benchmark Datasets**: collected from existing public OCSR benchmarks; please refer to their
-  original sources for license and attribution (table in
-  [doc/training.md](doc/training.md#2-data-preparation)).
+
+**Benchmark Datasets**: collected from existing public OCSR benchmarks; please refer to their original sources for license and attribution (table in [doc/training.md](doc/training.md#2-data-preparation)).
