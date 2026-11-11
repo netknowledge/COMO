@@ -1,10 +1,8 @@
 # COMO
 
-**COMO** (**C**losed-loop **O**ptical **M**olecule rec**O**gnition) is a deep
-learning framework that recognizes chemical structure diagrams from images and
-predicts SMILES strings with atom-level coordinates and bond matrices. It uses
-Minimum Risk Training (MRT) to directly optimize molecular-level,
-non-differentiable objectives.
+**COMO** (**C**losed-loop **O**ptical **M**olecule rec**O**gnition) is a deep learning framework that recognizes chemical structure diagrams from images and predicts SMILES strings with atom-level coordinates and bond matrices. It uses Minimum Risk Training (MRT) to directly optimize molecular-level, non-differentiable objectives.
+
+[Paper](https://arxiv.org/abs/2604.23546) $\cdot$ [PyPI](https://pypi.org/project/como-ocsr/) $\cdot$ [Hugging Face](https://huggingface.co/Keylab/COMO)
 
 ## Installation
 

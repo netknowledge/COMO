@@ -51,7 +51,7 @@ dependencies = [
 [project.optional-dependencies]
 # Training (repository clone + `pip install -e ".[training]"`): MLE / MRT /
 # joint loops under `training/`. The vendored Indigo renderer is Linux-only
-# (training/indigo). `crem` is optional (MolDiscriminator hard negatives).
+# (training/indigo). `CReM` is optional (MolDiscriminator hard negatives).
 training = [
     "func-timeout>=4.3",
     "tensorboard>=2.11",

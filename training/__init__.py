@@ -5,14 +5,19 @@ COMO Training
 Training loops for COMO molecule-image recognition.
 
 Contains:
-  - ``ddp_utils``    — DDP initialisation and process helpers
-  - ``losses``       — MLE loss computation (token + bond)
-  - ``reward``       — MRT loss and visual reward encoding
-  - ``datasets``     — MLE/MRT dataset loaders (synthetic render, USPTO, real images)
-  - ``utils``        — checkpoint/optimizer/TensorBoard shared infrastructure
-  - ``train_mle``    — supervised MLE training on synthetic/USPTO data
-  - ``train_mrt``    — RL (MRT) finetuning on real images
-  - ``train_joint``  — interleaved MLE + MRT joint training
+  - ``ddp_utils``         — DDP initialisation and process helpers
+  - ``ddp_validation``    — shared DDP validation loop
+  - ``losses``            — MLE loss computation (token + bond)
+  - ``reward``            — MRT loss and visual reward encoding
+  - ``utils``             — checkpoint/optimizer/TensorBoard shared infrastructure
+  - ``perf_timers``       — phase-level performance timers
+  - ``console_mirror``    — console-output mirroring helpers
+  - ``drawing_engine``    — Indigo/RDKit molecule rendering (dataset + reward paths)
+  - ``mol_discriminator`` — visual-reward encoder (MolDiscriminator) and its trainers
+  - ``datasets``          — MLE/MRT dataset loaders (synthetic render, USPTO, real images)
+  - ``train_mle``         — supervised MLE training on synthetic/USPTO data
+  - ``train_mrt``         — RL (MRT) finetuning on real images
+  - ``train_joint``       — interleaved MLE + MRT joint training
 
 Private package — not part of the pip-publishable ``como`` wheel; released as
 repository source code (import ``training`` from the repository root).

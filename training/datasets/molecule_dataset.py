@@ -152,7 +152,7 @@ class MoleculeDataset(Dataset):
         pool is disabled (``COMO_RENDER_POOL=0``).
         """
         try:
-            from render_pool import ENABLED, RenderPool
+            from .render_pool import ENABLED, RenderPool
         except Exception:
             ENABLED = False
         if not ENABLED:
