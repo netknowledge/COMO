@@ -21,14 +21,19 @@ pip install -e ".[training]"
 ## Quick Start
 
 ```python
-import como
+from como.model import ComoModel
+model = ComoModel.from_pretrained("Keylab/COMO-Tanimoto", device="cuda")
 
-model = como.load_model("checkpoints/models/edit_distance/final.pth")
+# or download checkpoint from HuggingFace:
+# huggingface-cli download Keylab/COMO models/tanimoto/final.pth
+import como
+model = como.load_model("models/tanimoto/final.pth", device="cuda")
+
 smiles = como.predict(model, "examples/sample_images/Metformin.png")
 # -> CN(C)C(=N)N=C(N)N
 ```
 
-A checkpoint and two lines of code are all you need for inference. See the [getting-started guide](doc/getting_started.md) for downloading checkpoints and the [examples](examples/) folder for runnable scripts and a notebook.
+See the [getting-started guide](doc/getting_started.md) for downloading checkpoints and the [examples](examples/) folder for runnable scripts and a notebook.
 
 ## Training
 

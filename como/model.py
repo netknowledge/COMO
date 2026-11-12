@@ -14,8 +14,6 @@ End-to-end molecule-image recognition: images → SMILES + atom coordinates + bo
 """
 
 from typing import Dict, List, Optional, Tuple
-import os
-import warnings
 
 import numpy as np
 from PIL import Image
@@ -29,9 +27,10 @@ import cv2
 from .vocab import ComoVocab
 from .image_encoder import ImageEncoder, PositionalEncoding2D
 from .sequence_decoder import SequenceDecoder
-from .bond_predictor import BondPredictor, _symmetrize_edge_predictions, _symmetrize_edge_predictions_batched
+from .bond_predictor import BondPredictor, _symmetrize_edge_predictions
 from .augmentations import CropWhiteInference, AdaptiveLongestMaxSize
-from .utils import extract_atom_indices_from_tokens, normalize_nodes
+from .utils import extract_atom_indices_from_tokens
+from huggingface_hub import PyTorchModelHubMixin
 
 
 __all__ = ['ComoModel']
@@ -104,7 +103,10 @@ def _pick_confidence(result: Dict, signal: str = CONFIDENCE_SIGNAL,
     return float(max(0.0, min(1.0, v)))
 
 
-class ComoModel(nn.Module):
+class ComoModel(nn.Module, PyTorchModelHubMixin,
+                repo_url='https://github.com/netknowledge/COMO',
+                paper_url='https://arxiv.org/abs/2604.23546',
+                docs_url='https://github.com/netknowledge/COMO/tree/main/doc'):
     """Canonical COMO model for molecule-image recognition.
 
     Architecture:

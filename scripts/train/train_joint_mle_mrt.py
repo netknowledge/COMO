@@ -45,8 +45,7 @@ from pathlib import Path
 import argparse
 import pickle
 
-# Locate the repository root (walks up; works for the nested COMO_dev layout
-# and the flat public-twin layout alike) and put it first on sys.path.
+# Locate the repository root and put it first on sys.path.
 project_dir = Path(__file__).resolve().parent
 while not (project_dir / 'project_naming.py').exists():
     if project_dir.parent == project_dir:

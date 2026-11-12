@@ -25,7 +25,15 @@ pip install -e ".[training]"
 Requirements: Python ≥ 3.10 with `torch ≥ 2.0` (GPU strongly recommended for
 anything beyond a handful of images).
 
-## 2. Download a checkpoint
+## 2. Load a checkpoint
+
+### 2.1 Via Hugging Face
+Simply:
+```python
+from como.model import ComoModel
+model = ComoModel.from_pretrained("Keylab/COMO-Tanimoto", device="cuda")
+```
+### 2.2 Via weight files
 
 Released checkpoints (HuggingFace [Keylab/COMO](https://huggingface.co/Keylab/COMO)):
 
@@ -43,13 +51,16 @@ ckpt = hf_hub_download("Keylab/COMO", "models/edit_distance/final.pth",
 ```
 
 or with the CLI: `hf download Keylab/COMO models/edit_distance/final.pth --local-dir checkpoints`
+then
+```python
+model = como.load_model(ckpt, device="cuda:0")   # "cpu" also works
+```
 
 ## 3. First prediction
 
 ```python
 import como
 
-model = como.load_model(ckpt, device="cuda:0")   # "cpu" also works
 smiles, conf = como.predict(model, "examples/sample_images/Metformin.png",
                             return_confidence=True)
 print(smiles, f"({conf:.2f})")
