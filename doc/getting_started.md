@@ -30,10 +30,10 @@ anything beyond a handful of images).
 ### 2.1 Via Hugging Face
 Simply:
 ```python
-from como.model import ComoModel
-model = ComoModel.from_pretrained("Keylab/COMO-Tanimoto", device="cuda")
+import como
+model = como.load_model("Keylab/COMO-Tanimoto", device="cuda")
 ```
-### 2.2 Via weight files
+### 2.2 Via files
 
 Released checkpoints (HuggingFace [Keylab/COMO](https://huggingface.co/Keylab/COMO)):
 
@@ -53,7 +53,8 @@ ckpt = hf_hub_download("Keylab/COMO", "models/edit_distance/final.pth",
 or with the CLI: `hf download Keylab/COMO models/edit_distance/final.pth --local-dir checkpoints`
 then
 ```python
-model = como.load_model(ckpt, device="cuda:0")   # "cpu" also works
+import como
+model = como.load_model(checkpint_path=ckpt, device="cuda:0")   # "cpu" also works
 ```
 
 ## 3. First prediction

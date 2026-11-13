@@ -21,13 +21,12 @@ pip install -e ".[training]"
 ## Quick Start
 
 ```python
-from como.model import ComoModel
-model = ComoModel.from_pretrained("Keylab/COMO-Tanimoto", device="cuda")
-
-# or download checkpoint from HuggingFace:
-# huggingface-cli download Keylab/COMO models/tanimoto/final.pth
 import como
-model = como.load_model("models/tanimoto/final.pth", device="cuda")
+# Load pretrained checkpoints from Hugging Face
+model = como.load_model("Keylab/COMO-Tanimoto")
+# or download checkpoint files from HuggingFace:
+# huggingface-cli download Keylab/COMO models/tanimoto/final.pth
+model = como.load_model(checkpint_path="models/tanimoto/final.pth")
 
 smiles = como.predict(model, "examples/sample_images/Metformin.png")
 # -> CN(C)C(=N)N=C(N)N

@@ -12,7 +12,7 @@ Quick start::
 
     import como
 
-    model = como.load_model("path/to/checkpoint.pth", device="cuda")
+    model = como.load_model(checkpoint_path="path/to/checkpoint.pth", device="cuda")
     smiles = como.predict(model, "molecule.png")
     print(smiles)  # "CC(=O)O"
 
@@ -38,7 +38,7 @@ from .evaluation import evaluate_benchmarks as _raw_evaluate_benchmarks
 from .inference import _result_to_smiles
 from .chemistry import canonicalize_smiles, canonicalize_tautomer
 
-__version__ = "1.3.2"
+__version__ = "1.3.3"
 
 __all__ = [
     # Core classes
@@ -65,14 +65,17 @@ import torch  # noqa: E402
 
 
 def load_model(
-    checkpoint_path: str,
+    HF_model_id: str | None = None,
+    checkpoint_path: str | None = None,
     device: str = "cuda",
     **model_kwargs,
 ) -> ComoModel:
-    """Load a COMO model from a checkpoint file.
+    """Load a COMO model from Hugging Face (prioritized) or a checkpoint file.
 
     Parameters
     ----------
+    HF_model_id:
+        HuggingFace model repo id (e.g. ``"Keylab/COMO-Tanimoto"``).
     checkpoint_path:
         Path to a ``.pth`` checkpoint (e.g. ``"COMO_joint/tanimoto/final.pth"``).
     device:
@@ -86,13 +89,21 @@ def load_model(
     ComoModel
         The loaded model in evaluation mode.
     """
+    if checkpoint_path is None and HF_model_id is None:
+        raise ValueError("Provide either checkpoint_path or HF_model_id.")
+
     vocab = ComoVocab(n_bins=64)
-    model = ComoModel(
-        vocab=vocab,
-        backbone="swin_b",
-        pretrained=True,
-        **model_kwargs,
-    )
+    if HF_model_id is not None:
+        print(f"Loading model from HuggingFace repo '{HF_model_id}'...")
+        model = ComoModel.from_pretrained(HF_model_id, vocab=vocab)
+        model.to(torch.device(device))
+        return model
+
+    if checkpoint_path is None:
+        raise ValueError("Provide either checkpoint_path or HF_model_id.")
+
+    print(f"Loading model from checkpoint file '{checkpoint_path}'...")
+    model = ComoModel(vocab=vocab, **model_kwargs,)
     model.load_model(checkpoint_path, device=torch.device(device))
     return model
 
