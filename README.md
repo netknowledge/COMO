@@ -4,6 +4,16 @@
 
 [Paper](https://arxiv.org/abs/2604.23546) $\cdot$ [PyPI](https://pypi.org/project/como-ocsr/) $\cdot$ [Hugging Face](https://huggingface.co/Keylab/COMO)
 
+## Online Demo
+
+Try COMO [online](https://huggingface.co/spaces/lyuzhuoqi/COMO) without any local deployment.
+
+## Using COMO via MCP
+
+1. Setting up [Hugging Face MCP server](https://huggingface.co/docs/hub/main/en/spaces-mcp-servers#add-an-existing-space-to-your-mcp-tools) on your MCP clients (VSCode, Claude, etc.).
+2. Adding [COMO](https://huggingface.co/spaces/lyuzhuoqi/COMO) to your [MCP tools](https://huggingface.co/docs/hub/main/en/spaces-mcp-servers#add-an-existing-space-to-your-mcp-tools).
+3. Now try COMO as a callable tool in your MCP clients!
+
 ## Installation
 
 ```bash
