@@ -6,7 +6,7 @@
 
 ## Hugging Face Spaces
 
-We host a [Hugging Face Space](https://huggingface.co/spaces/lyuzhuoqi/COMO) as both a online demo and a callable tool via MCP. Please be noted that the availability of this space is subjected to a daily per-user GPU time quota, and you might duplicate the space for your own account to obtain more quotas once the limit is reached. 
+We host a [Hugging Face Space](https://huggingface.co/spaces/lyuzhuoqi/COMO) as both an online demo and a callable tool via MCP. Please note that the availability of this space is subject to a daily per-user GPU time quota. 
 
 ### Online Demo
 
