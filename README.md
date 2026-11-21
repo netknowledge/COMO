@@ -4,14 +4,18 @@
 
 [Paper](https://arxiv.org/abs/2604.23546) $\cdot$ [PyPI](https://pypi.org/project/como-ocsr/) $\cdot$ [Hugging Face](https://huggingface.co/Keylab/COMO)
 
-## Online Demo
+## Hugging Face Spaces
+
+We host a [Hugging Face Space](https://huggingface.co/spaces/lyuzhuoqi/COMO) as both a online demo and a callable tool via MCP. Please be noted that the availability of this space is subjected to a daily per-user GPU time quota, and you might duplicate the space for your own account to obtain more quotas once the limit is reached. 
+
+### Online Demo
 
 Try COMO [online](https://huggingface.co/spaces/lyuzhuoqi/COMO) without any local deployment.
 
-## Using COMO via MCP
+### Using COMO via MCP
 
 1. Setting up [Hugging Face MCP server](https://huggingface.co/docs/hub/main/en/spaces-mcp-servers#add-an-existing-space-to-your-mcp-tools) on your MCP clients (VSCode, Claude, etc.).
-2. Adding [COMO](https://huggingface.co/spaces/lyuzhuoqi/COMO) to your [MCP tools](https://huggingface.co/docs/hub/main/en/spaces-mcp-servers#add-an-existing-space-to-your-mcp-tools).
+2. Adding [COMO](https://huggingface.co/spaces/lyuzhuoqi/COMO) to your [MCP tools](https://huggingface.co/docs/hub/main/en/spaces-mcp-servers#add-an-existing-space-to-your-mcp-tools) (by clicking the Agents button in the title bar).
 3. Now try COMO as a callable tool in your MCP clients!
 
 ## Installation
