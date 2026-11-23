@@ -14,8 +14,8 @@ Try COMO [online](https://huggingface.co/spaces/lyuzhuoqi/COMO) without any loca
 
 ### Using COMO via MCP
 
-1. Set up the [Hugging Face MCP server](https://huggingface.co/docs/hub/main/en/spaces-mcp-servers#add-an-existing-space-to-your-mcp-tools) on your MCP clients (VS Code, Claude, etc.).
-2. Add [COMO](https://huggingface.co/spaces/lyuzhuoqi/COMO) to your [MCP tools](https://huggingface.co/docs/hub/main/en/spaces-mcp-servers#add-an-existing-space-to-your-mcp-tools) (by clicking the Agents button in the title bar).
+1. Set up the [Hugging Face MCP server](https://huggingface.co/settings/mcp) on your MCP clients (VS Code, Claude, etc.).
+2. Add [COMO](https://huggingface.co/spaces/lyuzhuoqi/COMO) to your [MCP tools](https://huggingface.co/docs/hub/main/en/spaces-mcp-servers#add-an-existing-space-to-your-mcp-tools) (by clicking the "Agents" button in the title bar).
 3. Now try COMO as a callable tool in your MCP clients!
 
 ## Installation
